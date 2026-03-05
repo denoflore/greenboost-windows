@@ -31,6 +31,7 @@ __used __section("__versions") = {
 	{ 0xf2aabb37, "alloc_cpumask_var_node" },
 	{ 0xf296206e, "nr_cpu_ids" },
 	{ 0xb5c51982, "__cpu_online_mask" },
+	{ 0x494c552b, "_find_first_bit" },
 	{ 0x764988a2, "set_cpus_allowed_ptr" },
 	{ 0x02b7fa5b, "free_cpumask_var" },
 	{ 0x69a29051, "class_destroy" },
@@ -44,8 +45,9 @@ __used __section("__versions") = {
 	{ 0xf46d5bf3, "mutex_lock" },
 	{ 0x07d50c57, "idr_remove" },
 	{ 0xf46d5bf3, "mutex_unlock" },
-	{ 0x2684a94a, "__free_pages" },
+	{ 0x7ab1aa5e, "unpin_user_page" },
 	{ 0xf1de9e85, "kvfree" },
+	{ 0x2684a94a, "__free_pages" },
 	{ 0xe4de56b4, "__ubsan_handle_load_invalid_value" },
 	{ 0xdd1ad581, "__kvmalloc_node_noprof" },
 	{ 0x1bdf2bc8, "sme_me_mask" },
@@ -53,22 +55,32 @@ __used __section("__versions") = {
 	{ 0x70670de1, "vmap" },
 	{ 0x5e865cb8, "pgprot_writecombine" },
 	{ 0xb6d1d445, "vm_insert_page" },
+	{ 0xbd03ed67, "random_kmalloc_seed" },
+	{ 0x6ba71a8b, "kmalloc_caches" },
+	{ 0x7a0b7d1b, "__kmalloc_cache_noprof" },
+	{ 0xb09bc67d, "sg_alloc_table" },
+	{ 0x804af820, "sg_alloc_table_from_pages_segment" },
+	{ 0x2b97a5e9, "dma_map_sgtable" },
 	{ 0x092a35a2, "_copy_from_user" },
-	{ 0x5244a5dc, "idr_find" },
-	{ 0x092a35a2, "_copy_to_user" },
 	{ 0x3c0300ea, "eventfd_ctx_fdget" },
+	{ 0x8e329d60, "const_current_task" },
+	{ 0x16c6a373, "__tracepoint_mmap_lock_start_locking" },
+	{ 0xa59da3c0, "down_read" },
+	{ 0x16c6a373, "__tracepoint_mmap_lock_acquire_returned" },
+	{ 0x076537b2, "pin_user_pages" },
+	{ 0x16c6a373, "__tracepoint_mmap_lock_released" },
+	{ 0xa59da3c0, "up_read" },
 	{ 0x058c185a, "jiffies" },
 	{ 0x56fa7025, "dma_buf_export" },
 	{ 0xb82edfb3, "idr_alloc" },
 	{ 0xacba1b52, "dma_buf_fd" },
-	{ 0xbd03ed67, "random_kmalloc_seed" },
-	{ 0x6ba71a8b, "kmalloc_caches" },
-	{ 0x7a0b7d1b, "__kmalloc_cache_noprof" },
+	{ 0x092a35a2, "_copy_to_user" },
+	{ 0x5244a5dc, "idr_find" },
 	{ 0x6602c262, "alloc_pages_noprof" },
 	{ 0x05ce7807, "dma_buf_put" },
-	{ 0xb09bc67d, "sg_alloc_table" },
-	{ 0x804af820, "sg_alloc_table_from_pages_segment" },
-	{ 0x2b97a5e9, "dma_map_sgtable" },
+	{ 0xdc9af840, "__mmap_lock_do_trace_released" },
+	{ 0xdc9af840, "__mmap_lock_do_trace_start_locking" },
+	{ 0x0a83aa13, "__mmap_lock_do_trace_acquire_returned" },
 	{ 0xc51eb0e9, "param_ops_int" },
 	{ 0xd272d446, "__fentry__" },
 	{ 0xd272d446, "__x86_return_thunk" },
@@ -103,6 +115,7 @@ __used __section("__version_ext_crcs") = {
 	0xf2aabb37,
 	0xf296206e,
 	0xb5c51982,
+	0x494c552b,
 	0x764988a2,
 	0x02b7fa5b,
 	0x69a29051,
@@ -116,8 +129,9 @@ __used __section("__version_ext_crcs") = {
 	0xf46d5bf3,
 	0x07d50c57,
 	0xf46d5bf3,
-	0x2684a94a,
+	0x7ab1aa5e,
 	0xf1de9e85,
+	0x2684a94a,
 	0xe4de56b4,
 	0xdd1ad581,
 	0x1bdf2bc8,
@@ -125,22 +139,32 @@ __used __section("__version_ext_crcs") = {
 	0x70670de1,
 	0x5e865cb8,
 	0xb6d1d445,
-	0x092a35a2,
-	0x5244a5dc,
+	0xbd03ed67,
+	0x6ba71a8b,
+	0x7a0b7d1b,
+	0xb09bc67d,
+	0x804af820,
+	0x2b97a5e9,
 	0x092a35a2,
 	0x3c0300ea,
+	0x8e329d60,
+	0x16c6a373,
+	0xa59da3c0,
+	0x16c6a373,
+	0x076537b2,
+	0x16c6a373,
+	0xa59da3c0,
 	0x058c185a,
 	0x56fa7025,
 	0xb82edfb3,
 	0xacba1b52,
-	0xbd03ed67,
-	0x6ba71a8b,
-	0x7a0b7d1b,
+	0x092a35a2,
+	0x5244a5dc,
 	0x6602c262,
 	0x05ce7807,
-	0xb09bc67d,
-	0x804af820,
-	0x2b97a5e9,
+	0xdc9af840,
+	0xdc9af840,
+	0x0a83aa13,
 	0xc51eb0e9,
 	0xd272d446,
 	0xd272d446,
@@ -174,6 +198,7 @@ __used __section("__version_ext_names") =
 	"alloc_cpumask_var_node\0"
 	"nr_cpu_ids\0"
 	"__cpu_online_mask\0"
+	"_find_first_bit\0"
 	"set_cpus_allowed_ptr\0"
 	"free_cpumask_var\0"
 	"class_destroy\0"
@@ -187,8 +212,9 @@ __used __section("__version_ext_names") =
 	"mutex_lock\0"
 	"idr_remove\0"
 	"mutex_unlock\0"
-	"__free_pages\0"
+	"unpin_user_page\0"
 	"kvfree\0"
+	"__free_pages\0"
 	"__ubsan_handle_load_invalid_value\0"
 	"__kvmalloc_node_noprof\0"
 	"sme_me_mask\0"
@@ -196,22 +222,32 @@ __used __section("__version_ext_names") =
 	"vmap\0"
 	"pgprot_writecombine\0"
 	"vm_insert_page\0"
+	"random_kmalloc_seed\0"
+	"kmalloc_caches\0"
+	"__kmalloc_cache_noprof\0"
+	"sg_alloc_table\0"
+	"sg_alloc_table_from_pages_segment\0"
+	"dma_map_sgtable\0"
 	"_copy_from_user\0"
-	"idr_find\0"
-	"_copy_to_user\0"
 	"eventfd_ctx_fdget\0"
+	"const_current_task\0"
+	"__tracepoint_mmap_lock_start_locking\0"
+	"down_read\0"
+	"__tracepoint_mmap_lock_acquire_returned\0"
+	"pin_user_pages\0"
+	"__tracepoint_mmap_lock_released\0"
+	"up_read\0"
 	"jiffies\0"
 	"dma_buf_export\0"
 	"idr_alloc\0"
 	"dma_buf_fd\0"
-	"random_kmalloc_seed\0"
-	"kmalloc_caches\0"
-	"__kmalloc_cache_noprof\0"
+	"_copy_to_user\0"
+	"idr_find\0"
 	"alloc_pages_noprof\0"
 	"dma_buf_put\0"
-	"sg_alloc_table\0"
-	"sg_alloc_table_from_pages_segment\0"
-	"dma_map_sgtable\0"
+	"__mmap_lock_do_trace_released\0"
+	"__mmap_lock_do_trace_start_locking\0"
+	"__mmap_lock_do_trace_acquire_returned\0"
 	"param_ops_int\0"
 	"__fentry__\0"
 	"__x86_return_thunk\0"
@@ -234,4 +270,4 @@ __used __section("__version_ext_names") =
 MODULE_INFO(depends, "");
 
 
-MODULE_INFO(srcversion, "ED4AB393B0649628F99C9ED");
+MODULE_INFO(srcversion, "06B1AC1FE2D93A6A49629FB");

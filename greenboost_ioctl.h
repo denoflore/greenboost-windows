@@ -88,6 +88,14 @@ struct gb_poll_req {
 	gb_u32 _pad;
 };
 
+/* Pin an existing user-space virtual buffer (allocated by shim) */
+struct gb_pin_req {
+	gb_u64 vaddr;   /* user space pointer (in)    */
+	gb_u64 size;    /* bytes to pin       (in)    */
+	gb_s32 fd;      /* DMA-BUF fd returned (out)  */
+	gb_u32 flags;   /* GB_ALLOC_* flags   (in)    */
+};
+
 #define GB_IOCTL_MAGIC      'G'
 #define GB_IOCTL_ALLOC      _IOWR(GB_IOCTL_MAGIC, 1, struct gb_alloc_req)
 #define GB_IOCTL_GET_INFO   _IOR( GB_IOCTL_MAGIC, 2, struct gb_info)
@@ -95,6 +103,7 @@ struct gb_poll_req {
 #define GB_IOCTL_MADVISE    _IOW( GB_IOCTL_MAGIC, 4, struct gb_madvise_req)
 #define GB_IOCTL_EVICT      _IOW( GB_IOCTL_MAGIC, 5, struct gb_evict_req)
 #define GB_IOCTL_POLL_FD    _IOW( GB_IOCTL_MAGIC, 7, struct gb_poll_req)
+#define GB_IOCTL_PIN_USER_PTR _IOWR(GB_IOCTL_MAGIC, 8, struct gb_pin_req)
 
 /* Swap pressure thresholds */
 #define GB_SWAP_PRESSURE_OK       0

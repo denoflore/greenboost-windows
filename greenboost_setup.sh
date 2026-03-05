@@ -58,6 +58,12 @@ check_deps() {
     info "Checking build prerequisites..."
     command -v make >/dev/null || die "make not found (apt install build-essential)"
     command -v gcc  >/dev/null || die "gcc not found (apt install gcc)"
+
+    # Check for liburing-dev
+    if ! ldconfig -p | grep -q "liburing"; then
+        warn "liburing not found — required for ExLlamaV3 stloader. Install: sudo apt install liburing-dev"
+    fi
+
     local kdir="/lib/modules/$(uname -r)/build"
     [[ -d "$kdir" ]] || die "Kernel headers not found at $kdir
     Install with: sudo apt install linux-headers-$(uname -r)"
@@ -132,15 +138,15 @@ After=multi-user.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash -c 'for cpu in $(seq 0 15); do echo performance > /sys/devices/system/cpu/cpu${cpu}/cpufreq/scaling_governor; done'
-ExecStop=/bin/bash  -c 'for cpu in $(seq 0 15); do echo powersave  > /sys/devices/system/cpu/cpu${cpu}/cpufreq/scaling_governor; done'
+ExecStart=/bin/bash -c 'for cpu in $(seq 0 15); do echo performance > /sys/devices/system/cpu/cpu${cpu}/cpufreq/scaling_governor; done; cset set -c 4-7 -s inference_set || true; cset proc -m -f root -t inference_set -k || true'
+ExecStop=/bin/bash  -c 'for cpu in $(seq 0 15); do echo powersave  > /sys/devices/system/cpu/cpu${cpu}/cpufreq/scaling_governor; done; cset set -d inference_set || true'
 
 [Install]
 WantedBy=multi-user.target
 CPUEOF
     systemctl daemon-reload
     systemctl enable --now cpu-perf.service
-    info "CPU governor service installed and started"
+    info "CPU governor service installed and started (includes cset for golden cores)"
 
     # 4. THP sysfs.d — transparent hugepages for compaction + THP performance
     # NOTE: gb_alloc_buf() uses alloc_pages(GFP_KERNEL|__GFP_COMP, order=9) which draws
@@ -1002,30 +1008,35 @@ cmd_full_install() {
 
     # 7/7 — ExLlamaV3 with GreenBoost patches (optional)
     info "[7/7] ExLlamaV3 + GreenBoost integration..."
-    local exllama_dir
-    # Primary: greenboost_enhanced/ (with GreenBoost patches)
-    exllama_dir="$(dirname "$MODULE_DIR")/greenboost_enhanced/exllamav3"
-    # Fallback: libraries/exllamav3 (plain upstream ExLlamaV3)
-    if [[ ! -d "$exllama_dir" ]]; then
-        exllama_dir="$MODULE_DIR/libraries/exllamav3"
-    fi
+    local exllama_dir="/home/ferran/Dev/llibreries/greenboost_enhanced/exllamav3"
+
     if [[ -d "$exllama_dir" ]]; then
         info "Found ExLlamaV3 at $exllama_dir"
+
+        # Install system-wide shared location for the python library
+        local system_exllama_dir="/opt/greenboost/exllamav3"
+        info "Copying ExLlamaV3 to system shared directory ($system_exllama_dir)..."
+        mkdir -p /opt/greenboost
+        cp -r "$exllama_dir" /opt/greenboost/
+
         # Ensure liburing-dev is present (io_uring stloader)
         apt-get install -y liburing-dev python3-venv 2>/dev/null || true
         # Python 3.12+ (Ubuntu 24.04+) is "externally managed" — use a venv
         local venv_dir="/opt/greenboost/venv"
         if [[ ! -d "$venv_dir" ]]; then
             info "Creating Python venv at $venv_dir..."
-            mkdir -p /opt/greenboost
             python3 -m venv "$venv_dir" || die "python3 -m venv failed — install python3-venv"
         fi
-        STLOADER_USE_URING=1 "$venv_dir/bin/pip" install -e "$exllama_dir" --no-build-isolation \
+
+        # Make the system directory accessible to all users
+        chmod -R 755 /opt/greenboost
+
+        STLOADER_USE_URING=1 "$venv_dir/bin/pip" install -e "$system_exllama_dir" --no-build-isolation \
             && info "ExLlamaV3 installed in $venv_dir" \
-            || warn "ExLlamaV3 install failed — run manually: STLOADER_USE_URING=1 $venv_dir/bin/pip install -e $exllama_dir --no-build-isolation"
+            || warn "ExLlamaV3 install failed — run manually: STLOADER_USE_URING=1 $venv_dir/bin/pip install -e $system_exllama_dir --no-build-isolation"
         info "To use ExLlamaV3: source $venv_dir/bin/activate"
     else
-        warn "ExLlamaV3 not found. Place it at $MODULE_DIR/libraries/exllamav3/ then re-run."
+        warn "ExLlamaV3 not found at $exllama_dir. Place it there then re-run."
     fi
     echo ""
 

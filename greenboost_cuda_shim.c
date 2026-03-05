@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 
+#include <sys/mman.h>
 #include "greenboost_ioctl.h"   /* gb_alloc_req, GB_IOCTL_ALLOC — userspace-safe */
 
 /* ------------------------------------------------------------------ */
@@ -81,18 +82,70 @@ struct cudaExternalMemoryBufferDesc {
 /*  131072 slots × 64 bytes = 8 MB, aligned for cache-line access      */
 /* ------------------------------------------------------------------ */
 
+static int    gb_debug              = 0;
+
 #define HT_BITS   17u
 #define HT_SIZE   (1u << HT_BITS)
 #define HT_MASK   (HT_SIZE - 1u)
 #define HT_LOCKS  64u
+
+/* ------------------------------------------------------------------ */
+/*  Async Prefetching Queue & Worker                                    */
+/* ------------------------------------------------------------------ */
+
+#define PREFETCH_QUEUE_SIZE 256
+typedef struct {
+    void *mapped_ptr;
+    size_t size;
+} prefetch_req_t;
+
+static prefetch_req_t prefetch_queue[PREFETCH_QUEUE_SIZE];
+static int prefetch_head = 0;
+static int prefetch_tail = 0;
+static pthread_mutex_t prefetch_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t prefetch_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t prefetch_thread;
+
+static void* prefetch_worker(void* arg) {
+    while (1) {
+        prefetch_req_t req;
+        pthread_mutex_lock(&prefetch_mutex);
+        while (prefetch_head == prefetch_tail) {
+            pthread_cond_wait(&prefetch_cond, &prefetch_mutex);
+        }
+        req = prefetch_queue[prefetch_tail];
+        prefetch_tail = (prefetch_tail + 1) % PREFETCH_QUEUE_SIZE;
+        pthread_mutex_unlock(&prefetch_mutex);
+
+        /* Hint the kernel to bring the pages into RAM */
+        madvise(req.mapped_ptr, req.size, MADV_WILLNEED);
+        /* Use fprintf if gb_debug is on, since we can't use gb_log safely here without moving the macro */
+        if (gb_debug) fprintf(stderr, "[GreenBoost] prefetch thread: madvise(MADV_WILLNEED) on %p size=%zu\n", req.mapped_ptr, req.size);
+    }
+    return NULL;
+}
+
+static void enqueue_prefetch(void *mapped_ptr, size_t size) {
+    if (!mapped_ptr) return;
+    pthread_mutex_lock(&prefetch_mutex);
+    int next_head = (prefetch_head + 1) % PREFETCH_QUEUE_SIZE;
+    if (next_head != prefetch_tail) {
+        prefetch_queue[prefetch_head].mapped_ptr = mapped_ptr;
+        prefetch_queue[prefetch_head].size = size;
+        prefetch_head = next_head;
+        pthread_cond_signal(&prefetch_cond);
+    }
+    pthread_mutex_unlock(&prefetch_mutex);
+}
 
 typedef struct {
     CUdeviceptr           ptr;          /* 8 B  — 0 = empty slot         */
     size_t                size;         /* 8 B                            */
     int                   is_managed;   /* 4 B  — 1 = UVM, 0 = device    */
     int                   gb_buf_id;    /* 4 B  — -1 if not DMA-BUF      */
-    cudaExternalMemory_t  ext_mem;      /* 8 B  — non-NULL if imported    */
-    uint8_t               _pad[32];     /* pad to 64 bytes                */
+    void                 *mapped_ptr;   /* 8 B  — user-space mmap ptr    */
+    int                   fd;           /* 4 B  — DMA-BUF fd             */
+    uint8_t               _pad[28];     /* pad to 64 bytes                */
 } __attribute__((aligned(64))) gb_ht_entry_t;
 
 static gb_ht_entry_t      gb_htable[HT_SIZE];
@@ -111,7 +164,7 @@ static inline pthread_mutex_t *ht_lock(uint32_t h)
 
 /* Returns 1 on success, 0 if table is full. */
 static int ht_insert(CUdeviceptr ptr, size_t size, int is_managed,
-                     int gb_buf_id, cudaExternalMemory_t ext_mem)
+                     int gb_buf_id, void *mapped_ptr, int fd)
 {
     uint32_t h = ht_hash(ptr);
     uint32_t i;
@@ -124,7 +177,8 @@ static int ht_insert(CUdeviceptr ptr, size_t size, int is_managed,
             e->size       = size;
             e->is_managed = is_managed;
             e->gb_buf_id  = gb_buf_id;
-            e->ext_mem    = ext_mem;
+            e->mapped_ptr = mapped_ptr;
+            e->fd         = fd;
             pthread_mutex_unlock(lk);
             return 1;
         }
@@ -133,9 +187,9 @@ static int ht_insert(CUdeviceptr ptr, size_t size, int is_managed,
     return 0; /* table full */
 }
 
-/* Returns 1 if found, fills *out_size, *out_managed, *out_ext_mem. */
+/* Returns 1 if found, fills *out_size, *out_managed, *out_mapped_ptr, *out_fd. */
 static int ht_remove(CUdeviceptr ptr, size_t *out_size, int *out_managed,
-                     cudaExternalMemory_t *out_ext_mem)
+                     void **out_mapped_ptr, int *out_fd)
 {
     uint32_t h = ht_hash(ptr);
     uint32_t i;
@@ -144,9 +198,10 @@ static int ht_remove(CUdeviceptr ptr, size_t *out_size, int *out_managed,
         pthread_mutex_t *lk = ht_lock((h + i) & HT_MASK);
         pthread_mutex_lock(lk);
         if (e->ptr == ptr) {
-            if (out_size)     *out_size     = e->size;
-            if (out_managed)  *out_managed  = e->is_managed;
-            if (out_ext_mem)  *out_ext_mem  = e->ext_mem;
+            if (out_size)       *out_size       = e->size;
+            if (out_managed)    *out_managed    = e->is_managed;
+            if (out_mapped_ptr) *out_mapped_ptr = e->mapped_ptr;
+            if (out_fd)         *out_fd         = e->fd;
             memset(e, 0, sizeof(*e));
             pthread_mutex_unlock(lk);
             return 1;
@@ -179,6 +234,17 @@ typedef cudaError_t (*pfn_cudaDestroyExternalMemory)(cudaExternalMemory_t);
 typedef cudaError_t (*pfn_cudaMemGetInfo)(size_t *, size_t *);
 typedef CUresult    (*pfn_cuDeviceTotalMem_v2)(size_t *, CUdevice);
 
+/* New hooks for mmap DMA-BUF path */
+typedef CUresult    (*pfn_cuMemHostRegister)(void *, size_t, unsigned int);
+typedef CUresult    (*pfn_cuMemHostGetDevicePointer)(CUdeviceptr *, void *, unsigned int);
+#define CU_MEMHOSTREGISTER_PORTABLE     0x01
+#define CU_MEMHOSTREGISTER_DEVICEMAP    0x02
+#define CU_MEMHOSTREGISTER_IOMEMORY     0x2000000
+
+/* Prefetch API hooks */
+typedef CUresult    (*pfn_cuMemPrefetchAsync)(CUdeviceptr, size_t, CUdevice, CUstream);
+typedef cudaError_t (*pfn_cudaMemPrefetchAsync)(const void *, size_t, int, cudaStream_t);
+
 /* NVML types (minimal — avoids libnvidia-ml dependency) */
 typedef void *nvmlDevice_t;
 typedef unsigned int nvmlReturn_t;
@@ -210,19 +276,22 @@ static pfn_cuDeviceTotalMem_v2             real_cuDeviceTotalMem_v2;
 static pfn_nvmlDeviceGetMemoryInfo         real_nvmlDeviceGetMemoryInfo;
 static pfn_nvmlDeviceGetMemoryInfo_v2      real_nvmlDeviceGetMemoryInfo_v2;
 
+static pfn_cuMemHostRegister               real_cuMemHostRegister;
+static pfn_cuMemHostGetDevicePointer       real_cuMemHostGetDevicePointer;
+static pfn_cuMemPrefetchAsync              real_cuMemPrefetchAsync;
+static pfn_cudaMemPrefetchAsync            real_cudaMemPrefetchAsync;
+
 static size_t vram_headroom_bytes   = 1024ULL * 1024 * 1024; /* 1 GB */
 static size_t gb_virtual_vram_bytes = 51ULL * 1024 * 1024 * 1024; /* DDR4 pool — reported to CUDA */
-static int    gb_debug              = 0;
-/* DMA-BUF disabled by default: cudaExternalMemoryHandleTypeOpaqueFd is for
- * CUDA IPC memory, not arbitrary kernel DMA-BUF — import fails and corrupts
- * the CUDA context.  Set GREENBOOST_USE_DMA_BUF=1 to re-enable for testing. */
-static int    gb_use_dmabuf         = 0;
+/* DMA-BUF mmap+register is the primary path now. */
+static int    gb_use_dmabuf         = 1;
 static int    initialized           = 0;
 
 /* /dev/greenboost fd — opened lazily on first DMA-BUF allocation */
 static int        gb_dev_fd       = -1;
 static pthread_mutex_t gb_dev_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* Moved the macro definition up so it can be used anywhere */
 #define gb_log(fmt, ...) \
     do { if (gb_debug) fprintf(stderr, "[GreenBoost] " fmt "\n", ##__VA_ARGS__); } while (0)
 
@@ -247,16 +316,14 @@ static int gb_open_device(void)
 /* ------------------------------------------------------------------ */
 
 static CUresult gb_import_as_cuda_ptr(CUdeviceptr *dptr, size_t bytesize,
-                                       cudaExternalMemory_t *ext_out)
+                                       void **mapped_ptr_out, int *fd_out)
 {
     struct gb_alloc_req req;
-    struct cudaExternalMemoryHandleDesc hdesc;
-    struct cudaExternalMemoryBufferDesc bdesc;
-    cudaExternalMemory_t ext_mem;
     void *mapped_ptr;
-    int fd, ret;
+    int fd;
+    CUresult ret;
 
-    if (!real_cudaImportExternalMemory || !real_cudaExternalMemoryGetMappedBuffer)
+    if (!real_cuMemHostRegister || !real_cuMemHostGetDevicePointer)
         return CUDA_ERROR_NOT_SUPPORTED;
 
     fd = gb_open_device();
@@ -273,42 +340,40 @@ static CUresult gb_import_as_cuda_ptr(CUdeviceptr *dptr, size_t bytesize,
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
 
-    /* Import DMA-BUF fd as CUDA external memory.
-     * NOTE: cudaExternalMemoryHandleTypeOpaqueFd on Linux is designed for
-     * CUDA IPC handles, not arbitrary kernel DMA-BUF.  This path is kept
-     * for future compatibility but is disabled by default (gb_use_dmabuf=0).
-     * The CUDA driver takes ownership of the fd (even on failure). */
-    memset(&hdesc, 0, sizeof(hdesc));
-    hdesc.type        = cudaExternalMemoryHandleTypeOpaqueFd;
-    hdesc.handle.fd   = req.fd;
-    hdesc.size        = bytesize;
+    /* Map the DMA-BUF fd into userspace */
+    mapped_ptr = mmap(NULL, bytesize, PROT_READ | PROT_WRITE, MAP_SHARED, req.fd, 0);
+    if (mapped_ptr == MAP_FAILED) {
+        fprintf(stderr, "[GreenBoost] mmap failed for %zu MB: %m\n", bytesize >> 20);
+        close(req.fd);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
 
-    ret = real_cudaImportExternalMemory(&ext_mem, &hdesc);
+    /* Register the userspace pointer with CUDA */
+    ret = real_cuMemHostRegister(mapped_ptr, bytesize, CU_MEMHOSTREGISTER_DEVICEMAP);
     if (ret != CUDA_SUCCESS) {
-        fprintf(stderr,
-                "[GreenBoost] cudaImportExternalMemory FAILED ret=%d for %zu MB"
-                " (OpaqueFd is for CUDA IPC, not generic DMA-BUF)\n",
+        fprintf(stderr, "[GreenBoost] cuMemHostRegister FAILED ret=%d for %zu MB\n",
                 ret, bytesize >> 20);
-        /* NVIDIA takes ownership of fd even on failure — do NOT close() here */
+        munmap(mapped_ptr, bytesize);
+        close(req.fd);
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
 
-    memset(&bdesc, 0, sizeof(bdesc));
-    bdesc.size = bytesize;
-
-    ret = real_cudaExternalMemoryGetMappedBuffer(&mapped_ptr, ext_mem, &bdesc);
+    /* Get the device pointer for the registered memory */
+    ret = real_cuMemHostGetDevicePointer(dptr, mapped_ptr, 0);
     if (ret != CUDA_SUCCESS) {
-        fprintf(stderr,
-                "[GreenBoost] cudaExternalMemoryGetMappedBuffer FAILED ret=%d\n",
-                ret);
-        real_cudaDestroyExternalMemory(ext_mem);
+        fprintf(stderr, "[GreenBoost] cuMemHostGetDevicePointer FAILED ret=%d\n", ret);
+        /* CUDA unregister takes no size, just the pointer */
+        void (*cuMemHostUnregister)(void*) = dlsym(RTLD_NEXT, "cuMemHostUnregister");
+        if (cuMemHostUnregister) cuMemHostUnregister(mapped_ptr);
+        munmap(mapped_ptr, bytesize);
+        close(req.fd);
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
 
-    *dptr    = (CUdeviceptr)(uintptr_t)mapped_ptr;
-    *ext_out = ext_mem;
-    gb_log("DMA-BUF import: %zu MB at cuda_ptr=0x%llx", bytesize >> 20,
-           (unsigned long long)*dptr);
+    *mapped_ptr_out = mapped_ptr;
+    *fd_out = req.fd;
+    gb_log("DMA-BUF import: %zu MB at cuda_ptr=0x%llx (mapped=%p, fd=%d)",
+           bytesize >> 20, (unsigned long long)*dptr, mapped_ptr, req.fd);
     return CUDA_SUCCESS;
 }
 
@@ -338,6 +403,9 @@ static void gb_shim_init(void)
     /* Initialize lock arrays */
     for (i = 0; i < HT_LOCKS; i++)
         pthread_mutex_init(&ht_locks[i], NULL);
+
+    /* Start prefetch thread */
+    pthread_create(&prefetch_thread, NULL, prefetch_worker, NULL);
 
     libcuda = dlopen("libcuda.so.1", RTLD_NOW | RTLD_GLOBAL);
     if (!libcuda) {
@@ -377,6 +445,9 @@ static void gb_shim_init(void)
     real_cuDeviceTotalMem_v2 = (pfn_cuDeviceTotalMem_v2) dlsym(libcuda, "cuDeviceTotalMem_v2");
     if (!real_cuDeviceTotalMem_v2)
         real_cuDeviceTotalMem_v2 = (pfn_cuDeviceTotalMem_v2) dlsym(libcuda, "cuDeviceTotalMem");
+    real_cuMemHostRegister = (pfn_cuMemHostRegister) dlsym(libcuda, "cuMemHostRegister");
+    real_cuMemHostGetDevicePointer = (pfn_cuMemHostGetDevicePointer) dlsym(libcuda, "cuMemHostGetDevicePointer");
+    real_cuMemPrefetchAsync = (pfn_cuMemPrefetchAsync) dlsym(libcuda, "cuMemPrefetchAsync");
 
     /* NVML — loaded separately; Ollama uses this for GPU memory discovery */
     {
@@ -405,6 +476,8 @@ static void gb_shim_init(void)
             dlsym(libcudart, "cudaDestroyExternalMemory");
         real_cudaMemGetInfo                  = (pfn_cudaMemGetInfo)
             dlsym(libcudart, "cudaMemGetInfo");
+        real_cudaMemPrefetchAsync            = (pfn_cudaMemPrefetchAsync)
+            dlsym(libcudart, "cudaMemPrefetchAsync");
     }
     /* Fallback: some CUDA versions export runtime wrappers from libcuda.so.1 */
     if (!real_cudaMalloc)        real_cudaMalloc        = (pfn_cudaMalloc)        dlsym(libcuda, "cudaMalloc");
@@ -412,6 +485,7 @@ static void gb_shim_init(void)
     if (!real_cudaMallocManaged) real_cudaMallocManaged = (pfn_cudaMallocManaged)  dlsym(libcuda, "cudaMallocManaged");
     if (!real_cudaMallocAsync)   real_cudaMallocAsync   = (pfn_cudaMallocAsync)    dlsym(libcuda, "cudaMallocAsync");
     if (!real_cudaMemGetInfo)    real_cudaMemGetInfo    = (pfn_cudaMemGetInfo)     dlsym(libcuda, "cudaMemGetInfo");
+    if (!real_cudaMemPrefetchAsync) real_cudaMemPrefetchAsync = (pfn_cudaMemPrefetchAsync) dlsym(libcuda, "cudaMemPrefetchAsync");
 
     if (!real_cuMemAlloc_v2 || !real_cuMemFree_v2) {
         fprintf(stderr, "[GreenBoost] WARNING: failed to resolve core CUDA symbols\n");
@@ -425,8 +499,8 @@ static void gb_shim_init(void)
     fprintf(stderr, "[GreenBoost] UVM overflow      : %s (primary DDR4 path)\n",
             real_cuMemAllocManaged ? "available" : "UNAVAILABLE — load nvidia_uvm.ko");
     fprintf(stderr, "[GreenBoost] DMA-BUF import   : %s\n",
-            (real_cudaImportExternalMemory && gb_use_dmabuf) ? "enabled"
-            : gb_use_dmabuf ? "wanted but cudaImportExternalMemory missing"
+            (real_cuMemHostRegister && gb_use_dmabuf) ? "enabled (mmap+register path)"
+            : gb_use_dmabuf ? "wanted but cuMemHostRegister missing"
             : "disabled (set GREENBOOST_USE_DMA_BUF=1 to enable)");
     fprintf(stderr, "[GreenBoost] Async alloc hooks : cuMemAllocAsync=%s cudaMallocAsync=%s\n",
             real_cuMemAllocAsync ? "hooked" : "missing",
@@ -483,17 +557,69 @@ static int gb_needs_overflow(size_t bytesize)
 /* Try UVM first (safe, no context corruption), DMA-BUF second (disabled by default) */
 static CUresult gb_overflow_alloc(CUdeviceptr *dptr, size_t bytesize)
 {
-    cudaExternalMemory_t ext_mem = NULL;
+    void *mapped_ptr = NULL;
+    int fd = -1;
     CUresult ret;
 
-    /* ---- Path 1: UVM (cuMemAllocManaged) -------------------------------- */
-    /* Primary overflow path.  Backed by system RAM; GPU accesses via page   */
-    /* migration.  Does not touch cudaImportExternalMemory, so CUDA context  */
-    /* stays clean.                                                            */
+    /* ---- Path 1: DMA-BUF (primary path now) -------------------------- */
+    if (gb_use_dmabuf && real_cuMemHostRegister) {
+        /* Allocate anonymous memory using mmap, then ask greenboost.ko to pin it */
+        mapped_ptr = mmap(NULL, bytesize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (mapped_ptr == MAP_FAILED) {
+            fprintf(stderr, "[GreenBoost] mmap anonymous failed for %zu MB: %m\n", bytesize >> 20);
+            return CUDA_ERROR_OUT_OF_MEMORY;
+        }
+
+        fd = gb_open_device();
+        if (fd >= 0) {
+            struct gb_pin_req req;
+            memset(&req, 0, sizeof(req));
+            req.vaddr = (uint64_t)(uintptr_t)mapped_ptr;
+            req.size = bytesize;
+            req.flags = GB_ALLOC_WEIGHTS;
+            req.fd = -1;
+
+            if (ioctl(fd, GB_IOCTL_PIN_USER_PTR, &req) < 0) {
+                fprintf(stderr, "[GreenBoost] GB_IOCTL_PIN_USER_PTR failed for %zu MB: %m\n", bytesize >> 20);
+                munmap(mapped_ptr, bytesize);
+                mapped_ptr = NULL;
+            } else {
+                int dmabuf_fd = req.fd;
+                /* Register the userspace pointer with CUDA */
+                ret = real_cuMemHostRegister(mapped_ptr, bytesize, CU_MEMHOSTREGISTER_DEVICEMAP);
+                if (ret != CUDA_SUCCESS) {
+                    fprintf(stderr, "[GreenBoost] cuMemHostRegister FAILED ret=%d for %zu MB\n",
+                            ret, bytesize >> 20);
+                    munmap(mapped_ptr, bytesize);
+                    close(dmabuf_fd);
+                    return CUDA_ERROR_OUT_OF_MEMORY;
+                }
+
+                /* Get the device pointer for the registered memory */
+                ret = real_cuMemHostGetDevicePointer(dptr, mapped_ptr, 0);
+                if (ret != CUDA_SUCCESS) {
+                    fprintf(stderr, "[GreenBoost] cuMemHostGetDevicePointer FAILED ret=%d\n", ret);
+                    void (*cuMemHostUnregister)(void*) = dlsym(RTLD_NEXT, "cuMemHostUnregister");
+                    if (cuMemHostUnregister) cuMemHostUnregister(mapped_ptr);
+                    munmap(mapped_ptr, bytesize);
+                    close(dmabuf_fd);
+                    return CUDA_ERROR_OUT_OF_MEMORY;
+                }
+
+                ht_insert(*dptr, bytesize, 0 /* DMA-BUF */, -1, mapped_ptr, dmabuf_fd);
+                gb_log("DMA-BUF import (pinned): %zu MB at cuda_ptr=0x%llx (mapped=%p, fd=%d)",
+                       bytesize >> 20, (unsigned long long)*dptr, mapped_ptr, dmabuf_fd);
+                return CUDA_SUCCESS;
+            }
+        }
+    }
+
+    /* ---- Path 2: UVM (cuMemAllocManaged) -------------------------------- */
+    /* Fallback path. Backed by system RAM; GPU accesses via page migration. */
     if (real_cuMemAllocManaged) {
         ret = real_cuMemAllocManaged(dptr, bytesize, CU_MEM_ATTACH_GLOBAL);
         if (ret == CUDA_SUCCESS) {
-            ht_insert(*dptr, bytesize, 1 /* UVM */, -1, NULL);
+            ht_insert(*dptr, bytesize, 1 /* UVM */, -1, NULL, -1);
             gb_log("UVM alloc: %zu MB at 0x%llx", bytesize >> 20,
                    (unsigned long long)*dptr);
             return CUDA_SUCCESS;
@@ -506,19 +632,6 @@ static CUresult gb_overflow_alloc(CUdeviceptr *dptr, size_t bytesize)
     } else {
         fprintf(stderr, "[GreenBoost] UVM unavailable (real_cuMemAllocManaged=NULL)"
                 " for %zu MB\n", bytesize >> 20);
-    }
-
-    /* ---- Path 2: DMA-BUF (disabled by default) -------------------------- */
-    /* cudaExternalMemoryHandleTypeOpaqueFd is for CUDA IPC, not arbitrary   */
-    /* kernel DMA-BUF.  Enable with GREENBOOST_USE_DMA_BUF=1 for testing.   */
-    if (gb_use_dmabuf && real_cudaImportExternalMemory) {
-        ret = gb_import_as_cuda_ptr(dptr, bytesize, &ext_mem);
-        if (ret == CUDA_SUCCESS) {
-            ht_insert(*dptr, bytesize, 0 /* DMA-BUF */, -1, ext_mem);
-            return CUDA_SUCCESS;
-        }
-        fprintf(stderr, "[GreenBoost] DMA-BUF import FAILED ret=%d for %zu MB\n",
-                ret, bytesize >> 20);
     }
 
     return CUDA_ERROR_OUT_OF_MEMORY;
@@ -544,7 +657,7 @@ CUresult cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
 
     ret = real_cuMemAlloc_v2(dptr, bytesize);
     if (ret == CUDA_SUCCESS)
-        ht_insert(*dptr, bytesize, 0, -1, NULL);
+        ht_insert(*dptr, bytesize, 0, -1, NULL, -1);
     return ret;
 }
 
@@ -554,18 +667,25 @@ CUresult cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
 
 CUresult cuMemFree_v2(CUdeviceptr dptr)
 {
-    cudaExternalMemory_t ext_mem = NULL;
+    void *mapped_ptr = NULL;
+    int fd = -1;
     size_t sz = 0;
     int managed = 0;
 
     if (!initialized || !real_cuMemFree_v2)
         return CUDA_SUCCESS;
 
-    if (ht_remove(dptr, &sz, &managed, &ext_mem)) {
-        gb_log("cuMemFree_v2 ptr=0x%llx size=%zu MB managed=%d ext_mem=%p",
-               (unsigned long long)dptr, sz >> 20, managed, ext_mem);
-        if (ext_mem && real_cudaDestroyExternalMemory)
-            real_cudaDestroyExternalMemory(ext_mem);
+    if (ht_remove(dptr, &sz, &managed, &mapped_ptr, &fd)) {
+        gb_log("cuMemFree_v2 ptr=0x%llx size=%zu MB managed=%d mapped_ptr=%p fd=%d",
+               (unsigned long long)dptr, sz >> 20, managed, mapped_ptr, fd);
+        if (mapped_ptr) {
+            void (*cuMemHostUnregister)(void*) = dlsym(RTLD_NEXT, "cuMemHostUnregister");
+            if (cuMemHostUnregister) cuMemHostUnregister(mapped_ptr);
+            munmap(mapped_ptr, sz);
+        }
+        if (fd >= 0) {
+            close(fd);
+        }
     }
 
     return real_cuMemFree_v2(dptr);
@@ -594,7 +714,7 @@ CUresult cuMemAllocAsync(CUdeviceptr *dptr, size_t bytesize, CUstream hStream)
 
     ret = real_cuMemAllocAsync(dptr, bytesize, hStream);
     if (ret == CUDA_SUCCESS)
-        ht_insert(*dptr, bytesize, 0, -1, NULL);
+        ht_insert(*dptr, bytesize, 0, -1, NULL, -1);
     return ret;
 }
 
@@ -628,7 +748,7 @@ cudaError_t cudaMalloc(void **devPtr, size_t size)
 
     ret = real_cudaMalloc(devPtr, size);
     if (ret == CUDA_SUCCESS)
-        ht_insert((CUdeviceptr)(uintptr_t)*devPtr, size, 0, -1, NULL);
+        ht_insert((CUdeviceptr)(uintptr_t)*devPtr, size, 0, -1, NULL, -1);
     return ret;
 }
 
@@ -662,7 +782,7 @@ cudaError_t cudaMallocAsync(void **devPtr, size_t size, cudaStream_t stream)
 
     ret = real_cudaMallocAsync(devPtr, size, stream);
     if (ret == CUDA_SUCCESS)
-        ht_insert((CUdeviceptr)(uintptr_t)*devPtr, size, 0, -1, NULL);
+        ht_insert((CUdeviceptr)(uintptr_t)*devPtr, size, 0, -1, NULL, -1);
     return ret;
 }
 
@@ -672,7 +792,8 @@ cudaError_t cudaMallocAsync(void **devPtr, size_t size, cudaStream_t stream)
 
 cudaError_t cudaFree(void *devPtr)
 {
-    cudaExternalMemory_t ext_mem = NULL;
+    void *mapped_ptr = NULL;
+    int fd = -1;
     size_t sz = 0;
     int managed = 0;
     CUdeviceptr dptr = (CUdeviceptr)(uintptr_t)devPtr;
@@ -685,14 +806,77 @@ cudaError_t cudaFree(void *devPtr)
     if (!real_cudaFree)
         return CUDA_SUCCESS;
 
-    if (ht_remove(dptr, &sz, &managed, &ext_mem)) {
-        gb_log("cudaFree ptr=0x%llx size=%zu MB managed=%d ext_mem=%p",
-               (unsigned long long)dptr, sz >> 20, managed, ext_mem);
-        if (ext_mem && real_cudaDestroyExternalMemory)
-            real_cudaDestroyExternalMemory(ext_mem);
+    if (ht_remove(dptr, &sz, &managed, &mapped_ptr, &fd)) {
+        gb_log("cudaFree ptr=0x%llx size=%zu MB managed=%d mapped_ptr=%p fd=%d",
+               (unsigned long long)dptr, sz >> 20, managed, mapped_ptr, fd);
+        if (mapped_ptr) {
+            void (*cuMemHostUnregister)(void*) = dlsym(RTLD_NEXT, "cuMemHostUnregister");
+            if (cuMemHostUnregister) cuMemHostUnregister(mapped_ptr);
+            munmap(mapped_ptr, sz);
+        }
+        if (fd >= 0) {
+            close(fd);
+        }
     }
 
     return real_cudaFree(devPtr);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Prefetching overrides (cuMemPrefetchAsync, cudaMemPrefetchAsync)    */
+/* ------------------------------------------------------------------ */
+
+CUresult cuMemPrefetchAsync(CUdeviceptr dptr, size_t count, CUdevice dstDevice, CUstream hStream)
+{
+    void *mapped_ptr = NULL;
+    size_t sz = 0;
+    int managed = 0, fd = -1;
+
+    if (!initialized || !real_cuMemPrefetchAsync)
+        return CUDA_SUCCESS;
+
+    /* Check if this is a GreenBoost DMA-BUF allocation */
+    if (ht_remove(dptr, &sz, &managed, &mapped_ptr, &fd)) {
+        if (mapped_ptr) {
+            enqueue_prefetch(mapped_ptr, count < sz ? count : sz);
+        }
+        /* Re-insert since we only peeked */
+        ht_insert(dptr, sz, managed, -1, mapped_ptr, fd);
+
+        /* We handled the prefetch via host thread, skip real CUDA prefetch
+           because CUDA doesn't prefetch cuMemHostRegister memory implicitly */
+        return CUDA_SUCCESS;
+    }
+
+    return real_cuMemPrefetchAsync(dptr, count, dstDevice, hStream);
+}
+
+cudaError_t cudaMemPrefetchAsync(const void *devPtr, size_t count, int dstDevice, cudaStream_t stream)
+{
+    void *mapped_ptr = NULL;
+    size_t sz = 0;
+    int managed = 0, fd = -1;
+    CUdeviceptr dptr = (CUdeviceptr)(uintptr_t)devPtr;
+
+    if (!initialized)
+        return CUDA_SUCCESS;
+
+    if (!real_cudaMemPrefetchAsync) {
+        real_cudaMemPrefetchAsync = (pfn_cudaMemPrefetchAsync)dlsym(RTLD_NEXT, "cudaMemPrefetchAsync");
+    }
+
+    if (ht_remove(dptr, &sz, &managed, &mapped_ptr, &fd)) {
+        if (mapped_ptr) {
+            enqueue_prefetch(mapped_ptr, count < sz ? count : sz);
+        }
+        ht_insert(dptr, sz, managed, -1, mapped_ptr, fd);
+        return CUDA_SUCCESS;
+    }
+
+    if (real_cudaMemPrefetchAsync)
+        return real_cudaMemPrefetchAsync(devPtr, count, dstDevice, stream);
+
+    return CUDA_SUCCESS;
 }
 
 /* ------------------------------------------------------------------ */
@@ -896,6 +1080,8 @@ static void *gb_get_hook(const char *name)
     if (strcmp(name, "cuMemAlloc_v2")              == 0) return (void *)cuMemAlloc_v2;
     if (strcmp(name, "cuMemAllocAsync")            == 0) return (void *)cuMemAllocAsync;
     if (strcmp(name, "cuMemFree_v2")               == 0) return (void *)cuMemFree_v2;
+    if (strcmp(name, "cuMemPrefetchAsync")         == 0) return (void *)cuMemPrefetchAsync;
+    if (strcmp(name, "cudaMemPrefetchAsync")       == 0) return (void *)cudaMemPrefetchAsync;
 
     return NULL;
 }

@@ -152,7 +152,8 @@ struct gb_buf {
 	struct page    **hpages;
 	unsigned int     nhpages;
 	/* common */
-	bool             hugepages;   /* which path is active            */
+	bool             hugepages;
+	bool             user_pinned;    /* which path is active            */
 	unsigned int     npages;      /* total in 4K units               */
 	size_t           size;
 	int              id;          /* IDR id (0 = not yet registered) */
@@ -287,7 +288,11 @@ static void gb_release(struct dma_buf *dmabuf)
 	else
 		atomic64_sub(buf->size, &gb_dev.pool_allocated);
 
-	if (buf->hugepages) {
+	if (buf->user_pinned) {
+		for (i = 0; i < buf->npages; i++)
+			unpin_user_page(buf->pages[i]);
+		kvfree(buf->pages);
+	} else if (buf->hugepages) {
 		for (i = 0; i < buf->nhpages; i++)
 			__free_pages(buf->hpages[i], GB_HPAGE_ORDER);
 		kvfree(buf->hpages);
@@ -374,6 +379,75 @@ static const struct dma_buf_ops gb_dma_buf_ops = {
 	.vmap          = gb_vmap_op,
 	.vunmap        = gb_vunmap_op,
 };
+
+/* ------------------------------------------------------------------ */
+/*  Page pinning from userspace (FOLL_LONGTERM)                       */
+/* ------------------------------------------------------------------ */
+
+static struct gb_buf *gb_pin_user_buf(u64 vaddr, size_t size, u32 flags)
+{
+	struct gb_buf *buf;
+	unsigned int np = DIV_ROUND_UP(size, PAGE_SIZE);
+	size_t aligned_size = (size_t)np * PAGE_SIZE;
+	int ret;
+	unsigned int i;
+	u64 t2_max = (u64)virtual_vram_gb * (1ULL << 30);
+	u64 t2_used = (u64)atomic64_read(&gb_dev.pool_allocated);
+
+	if (t2_used + aligned_size > t2_max) {
+		pr_warn(DRIVER_NAME ": T2 cap reached for pinned memory\n");
+		return ERR_PTR(-ENOMEM);
+	}
+
+	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
+	if (!buf)
+		return ERR_PTR(-ENOMEM);
+
+	buf->pages = kvcalloc(np, sizeof(struct page *), GFP_KERNEL);
+	if (!buf->pages) {
+		kfree(buf);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	/* Pin the user pages with FOLL_LONGTERM so they can be safely used for DMA */
+	mmap_read_lock(current->mm);
+	ret = pin_user_pages(vaddr, np, FOLL_WRITE | FOLL_LONGTERM, buf->pages);
+	mmap_read_unlock(current->mm);
+
+	if (ret < 0 || ret != np) {
+		if (ret > 0) {
+			for (i = 0; i < ret; i++)
+				unpin_user_page(buf->pages[i]);
+		}
+		kvfree(buf->pages);
+		kfree(buf);
+		pr_err(DRIVER_NAME ": pin_user_pages failed: %d\n", ret);
+		return ERR_PTR(ret < 0 ? ret : -ENOMEM);
+	}
+
+	buf->hugepages = false;
+	buf->user_pinned = true;
+	buf->npages = np;
+	buf->size = aligned_size;
+
+	buf->id = 0;
+	buf->tier = GB_TIER2_DDR4;
+	buf->alloc_flags = flags;
+	buf->alloc_jiffies = jiffies;
+	buf->last_jiffies = jiffies;
+	buf->frozen = (flags & GB_ALLOC_FROZEN) ? 1 : 0;
+	INIT_LIST_HEAD(&buf->lru_node);
+
+	atomic64_add(buf->size, &gb_dev.pool_allocated);
+	atomic_inc(&gb_dev.active_bufs);
+
+	spin_lock(&gb_dev.lru_lock);
+	list_add_tail(&buf->lru_node, &gb_dev.lru_list);
+	spin_unlock(&gb_dev.lru_lock);
+
+	gb_dbg("pinned %u user pages (%zuMB)\n", np, aligned_size >> 20);
+	return buf;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Page pool allocator                                                 */
@@ -586,6 +660,76 @@ static long gb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		pr_info(DRIVER_NAME
 			": allocated %zuMB buffer (id=%d fd=%d)\n",
+			buf->size >> 20, buf->id, fd);
+		return 0;
+	}
+
+	case GB_IOCTL_PIN_USER_PTR: {
+		struct gb_pin_req req;
+		struct gb_buf *buf;
+		DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+		struct dma_buf *dmabuf;
+		int id, fd;
+		unsigned int j;
+
+		if (copy_from_user(&req, (void __user *)arg, sizeof(req)))
+			return -EFAULT;
+
+		if (!req.size || !req.vaddr ||
+		    req.size > (u64)virtual_vram_gb * (1ULL << 30))
+			return -EINVAL;
+
+		/* 1. Pin user memory */
+		buf = gb_pin_user_buf((u64)req.vaddr, (size_t)req.size, req.flags);
+		if (IS_ERR(buf))
+			return PTR_ERR(buf);
+
+		/* 2. Export as DMA-BUF */
+		exp_info.ops   = &gb_dma_buf_ops;
+		exp_info.size  = buf->size;
+		exp_info.flags = O_RDWR | O_CLOEXEC;
+		exp_info.priv  = buf;
+
+		dmabuf = dma_buf_export(&exp_info);
+		if (IS_ERR(dmabuf)) {
+			atomic_dec(&gb_dev.active_bufs);
+			atomic64_sub(buf->size, &gb_dev.pool_allocated);
+			for (j = 0; j < buf->npages; j++)
+				unpin_user_page(buf->pages[j]);
+			kvfree(buf->pages);
+			kfree(buf);
+			return PTR_ERR(dmabuf);
+		}
+		buf->dmabuf = dmabuf;
+
+		/* 3. Register in IDR */
+		mutex_lock(&gb_dev.lock);
+		id = idr_alloc(&gb_dev.idr, buf, 1, 0, GFP_KERNEL);
+		mutex_unlock(&gb_dev.lock);
+
+		if (id < 0) {
+			dma_buf_put(dmabuf);
+			return id;
+		}
+		buf->id = id;
+
+		/* 4. Install fd in caller's file table */
+		fd = dma_buf_fd(dmabuf, O_CLOEXEC);
+		if (fd < 0) {
+			mutex_lock(&gb_dev.lock);
+			idr_remove(&gb_dev.idr, buf->id);
+			mutex_unlock(&gb_dev.lock);
+			buf->id = 0;
+			dma_buf_put(dmabuf);
+			return fd;
+		}
+
+		req.fd = fd;
+		if (copy_to_user((void __user *)arg, &req, sizeof(req)))
+			return -EFAULT;
+
+		pr_info(DRIVER_NAME
+			": pinned %zuMB user buffer (id=%d fd=%d)\n",
 			buf->size >> 20, buf->id, fd);
 		return 0;
 	}
@@ -1046,28 +1190,33 @@ static int __init gb_init(void)
 		goto err_device;
 	}
 
-	/* Pin watchdog to P-cores (CPU 0-pcores_max_cpu) to avoid E-cores.
-	 * E-cores lack HT and run at 4.4 GHz vs 6 GHz — latency matters
-	 * for the 500 ms OOM + swap-pressure polling loop.
+	/* Pin watchdog to E-cores to avoid stealing cycles from P-cores.
+	 * E-cores (CPUs > pcores_max_cpu) run at 4.4 GHz vs 6 GHz.
+	 * We want to keep the Golden P-cores (4-7) free for inference.
 	 */
 	if (pcores_only) {
-		cpumask_var_t pmask;
+		cpumask_var_t emask;
 		int cpu;
 
-		if (alloc_cpumask_var(&pmask, GFP_KERNEL)) {
-			cpumask_clear(pmask);
-			for (cpu = 0;
-			     cpu <= min(pcores_max_cpu, (int)(nr_cpu_ids - 1));
-			     cpu++) {
+		if (alloc_cpumask_var(&emask, GFP_KERNEL)) {
+			cpumask_clear(emask);
+			for (cpu = pcores_max_cpu + 1; cpu < nr_cpu_ids; cpu++) {
 				if (cpu_online(cpu))
-					cpumask_set_cpu(cpu, pmask);
+					cpumask_set_cpu(cpu, emask);
 			}
-			set_cpus_allowed_ptr(gb_dev.watchdog, pmask);
-			free_cpumask_var(pmask);
+			/* Fallback to all CPUs if no E-cores found */
+			if (cpumask_empty(emask)) {
+				for (cpu = 0; cpu < nr_cpu_ids; cpu++) {
+					if (cpu_online(cpu))
+						cpumask_set_cpu(cpu, emask);
+				}
+			}
+			set_cpus_allowed_ptr(gb_dev.watchdog, emask);
+			free_cpumask_var(emask);
 			pr_info(DRIVER_NAME
-				": watchdog pinned to P-cores CPU 0-%d "
-				"(golden: CPU %d-%d @ 6 GHz)\n",
-				pcores_max_cpu,
+				": watchdog pinned away from P-cores (to E-cores %d-%d) "
+				"to reserve golden P-cores (%d-%d) for inference\n",
+				pcores_max_cpu + 1, nr_cpu_ids - 1,
 				golden_cpu_min, golden_cpu_max);
 		}
 	}
