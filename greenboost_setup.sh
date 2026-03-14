@@ -1224,6 +1224,14 @@ cmd_full_install() {
         site_packages="$("$venv_dir/bin/python" -c \
             'import sysconfig; print(sysconfig.get_path("purelib"))')"
 
+        # Remove any partial pip state left by previous failed "pip install -e"
+        # attempts. Those runs register dist-info metadata even when the CUDA/Rust
+        # build fails, making pip report spurious dependency conflict warnings.
+        "$venv_dir/bin/python" -m pip uninstall exllamav3 -y -q 2>/dev/null || true
+        # Also remove any stale editable .pth or egg-link artefacts
+        rm -f "$site_packages"/__editable__.exllamav3*.pth \
+              "$site_packages"/exllamav3.egg-link 2>/dev/null || true
+
         # Add ExLlamaV3 source directory to Python path (no CUDA build at install)
         echo "$exllama_dir" > "$site_packages/exllamav3.pth"
         info "ExLlamaV3 Python path registered: $site_packages/exllamav3.pth"
@@ -1231,6 +1239,7 @@ cmd_full_install() {
         # Install ExLlamaV3's pure-Python / binary-wheel dependencies.
         # Omit flash_attn (source-only, 30+ min) and pydantic 2.11.0 (Rust build).
         # Use pydantic>=2.11.0 without upper pin so pip finds a Python 3.14 wheel.
+        # exllamav3 is managed via .pth (not pip), so no resolver conflicts.
         "$venv_dir/bin/python" -m pip install -q \
             ninja "marisa-trie" "kbnf>=0.4.2" "formatron>=0.5.0" \
             "pydantic>=2.11.0" \
