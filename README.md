@@ -204,31 +204,32 @@ PTQ — and use GreenBoost's DDR4 pool for KV cache only.
 
 ---
 
-## Repository structure
+## Usage
 
 ```
-greenboost.c              — kernel module (char device, DMA-BUF, IOCTL, watchdog)
-greenboost_cuda_shim.c    — CUDA LD_PRELOAD shim (allocation intercept, dlsym hook)
-greenboost_ioctl.h        — shared IOCTL definitions (kernel + userspace)
-greenboost_setup.sh       — full installer (hardware detection, build, configure, diagnose)
-Makefile                  — builds kernel module + shim
+sudo ./greenboost_setup.sh <command>
 
-tools/
-  greenboost-exllama.sh   — ExLlamaV3 launcher with GreenBoost cache
-  convert_to_exl3.sh      — HuggingFace → EXL3 quantization
-  greenboost-kvpress.sh   — runtime KV cache compression (kvpress)
-  greenboost-ptq.py       — post-training quantization (NVIDIA ModelOpt)
-  greenboost-lora-train.py — LoRA fine-tuning via Unsloth
+COMMANDS:
+  install     Build and install module + CUDA shim system-wide
+  uninstall   Unload, remove module + all config files
+  build       Build only (no system install)
+  load        Load module with default 3-tier parameters
+  unload      Unload module (keeps installed files)
+  tune        Tune system for LLM workloads (governor, NVMe, THP, sysctl)
+  tune-grub   Fix GRUB boot params (THP=always, rcu_nocbs, nohz_full…)
+  tune-sysctl Consolidate sysctl files + apply compute-optimized knobs
+  tune-libs   Install missing AI/compute libraries (OpenBLAS, hwloc…)
+  tune-all    Run tune + tune-grub + tune-sysctl + tune-libs in sequence
+  install-sys-configs  Install Ollama env, NVMe udev, CPU governor, hugepages, sysctl
+  install-deps         Install all Ubuntu OS packages (build + CUDA + AI libs)
+  setup-swap [GB]      Create/activate NVMe swap (default: auto-sized, ~64 GB for target model)
+  full-install [--owner-workstation]  Complete install — hardware auto-detected or owner preset
+  status      Show module status and 3-tier pool info
+  diagnose    Full health check — run this after reboot to verify everything works
+  optimize-model [--model M] [--strategy tensorrt|lora|exllama|all]
+               Optimize LLM for max speed: TRT-LLM, LoRA, ExLlamaV3
+  help        Show this help
 
-libraries/
-  exllamav3/              — ExLlamaV3 with GreenBoost cache patches
-  kvcompress/             — kvpress and related KV compression tools
-  Model-Optimizer/        — NVIDIA ModelOpt PTQ library
-  TensorRT-Edge-LLM/      — TensorRT engine export
-  LoRA/                   — loralib (Unsloth uses this under the hood)
-
-architecture.md           — detailed technical architecture reference
-plan.md                   — integration plan and implementation status
 ```
 
 ---
