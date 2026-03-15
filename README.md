@@ -4,6 +4,12 @@
 **License:** GPL v2 (open-source)
 **Status:** First public release — after several months of testing on real hardware
 
+<div align="center">
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/nvidia_greenboost)
+
+</div>
+
 ---
 
 I have been quietly working on this for a while and figured it was time to share it with the
