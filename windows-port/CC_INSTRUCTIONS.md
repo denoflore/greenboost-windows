@@ -58,9 +58,16 @@ Before writing ANY code, read and internalize these source files from the cloned
 | `nr_free_pages` / swap info | `GlobalMemoryStatusEx` (user) / `MmQuerySystemMemoryInformation` (kernel) | Different API, same data |
 
 **CUDA EXTERNAL MEMORY — THE KEY DIFFERENCE:**
-On Linux, the flow is: kernel allocates pages -> exports DMA-BUF fd -> shim mmaps fd -> `cuMemHostRegister` + `cuMemHostGetDevicePointer`.
-On Windows, the flow is: driver allocates pages -> creates shared section -> returns NT handle -> shim maps view -> `cuMemHostRegister` + `cuMemHostGetDevicePointer`.
-The `cuMemHostRegister` path works identically on both platforms. This is the critical insight that makes the port tractable.
+
+The Linux shim actually has TWO import paths:
+1. **Primary:** `cudaImportExternalMemory(cudaExternalMemoryHandleTypeOpaqueFd)` + `cudaExternalMemoryGetMappedBuffer` — imports DMA-BUF fd directly as a CUDA external memory object
+2. **Fallback (mmap path):** kernel exports DMA-BUF fd -> shim `mmap(fd)` -> `cuMemHostRegister(DEVICEMAP)` -> `cuMemHostGetDevicePointer`
+
+The Linux shim code uses path #2 (mmap + cuMemHostRegister). On Windows:
+- Path #1 would use `cudaExternalMemoryHandleTypeOpaqueWin32` with an NT handle — but this requires CUDA to understand the memory backing, which is complex with section objects
+- **Path #2 (recommended for Windows):** driver allocates pages -> creates shared section -> returns NT handle -> shim `MapViewOfFile(handle)` -> `cuMemHostRegister(DEVICEMAP)` -> `cuMemHostGetDevicePointer`
+
+The `cuMemHostRegister` path works identically on both platforms. This is the critical insight that makes the port tractable. The only difference is how the memory gets mapped into the shim's address space (mmap vs MapViewOfFile).
 
 **DRIVER SIGNING:**
 - Use test signing during development: `bcdedit /set testsigning on`
@@ -76,6 +83,18 @@ The `cuMemHostRegister` path works identically on both platforms. This is the cr
 - Do NOT require CUDA SDK to build the shim (define minimal types inline, as original does)
 - Do NOT use GPL-only Windows APIs (this port is independently developed, clean-room from architecture doc)
 - Do NOT hardcode hardware values; detect at runtime like the Linux version
+
+**ADDITIONAL WINDOWS-SPECIFIC NOTES:**
+
+1. **Async prefetch worker:** The Linux shim has a `prefetch_worker` thread that calls `madvise(MADV_WILLNEED)`. On Windows, port this to `PrefetchVirtualMemory` (available Windows 8+). The circular queue + condition variable logic ports directly (`pthread_cond_t` → `CONDITION_VARIABLE`, `pthread_mutex_t` → `CRITICAL_SECTION`).
+
+2. **Hash table delete bug:** The Linux `ht_remove` clears slots with `memset(e, 0, sizeof(*e))` which breaks open-addressing probe chains (a later probe past the cleared slot will stop early). The Windows port should use a tombstone marker instead of zeroing, or implement Robin Hood deletion. This is a pre-existing Linux bug worth fixing in the port.
+
+3. **ExLlamaV3 Python integration:** The Linux ExLlamaV3 cache uses `mmap.mmap(dma_buf_fd, ...)` for zero-copy DMA-BUF → numpy → PyTorch. On Windows, this path would use `mmap.mmap(-1, size, tagname='GreenBoostBuf_N')` on a named file mapping, or the shim could expose a Python-callable C extension. This is a stretch goal — Phase 5 focuses on Ollama/LM Studio first.
+
+4. **IOCTL error cleanup in GB_IOCTL_ALLOC:** The Linux code's error path for `dma_buf_export` failure only frees 4K pages (`__free_page`), not hugepages. The Windows port must handle both contiguous and MDL-based allocations in error cleanup.
+
+5. **Target architecture:** x64 only. The driver and shim are 64-bit. No 32-bit support needed (CUDA 12+ dropped 32-bit).
 
 ---
 
@@ -127,7 +146,7 @@ greenboost-win/
 #define GB_IOCTL_MADVISE     CTL_CODE(GB_IOCTL_TYPE, 0x804, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define GB_IOCTL_EVICT       CTL_CODE(GB_IOCTL_TYPE, 0x805, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define GB_IOCTL_POLL_FD     CTL_CODE(GB_IOCTL_TYPE, 0x807, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define GB_IOCTL_PIN_USER    CTL_CODE(GB_IOCTL_TYPE, 0x808, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define GB_IOCTL_PIN_USER_PTR CTL_CODE(GB_IOCTL_TYPE, 0x808, METHOD_BUFFERED, FILE_ANY_ACCESS)
 ```
 
 Reuse the struct definitions from `greenboost_ioctl.h` with Windows-compatible types:
@@ -135,6 +154,10 @@ Reuse the struct definitions from `greenboost_ioctl.h` with Windows-compatible t
 - `gb_u32` -> `UINT32`
 - `gb_s32` -> `INT32`
 - `gb_alloc_req.fd` becomes `gb_alloc_req.handle` (HANDLE, not int fd)
+- `gb_alloc_req` must also return `buf_id` (INT32) — Linux derives buf_id from fd via IDR lookup, but Windows needs it explicit for MADVISE/EVICT operations
+- `gb_pin_req.fd` -> `gb_pin_req.handle` (HANDLE) + add `buf_id` (INT32)
+- `gb_poll_req.efd` is replaced entirely — Windows uses a named event (`\\BaseNamedObjects\\GreenBoostPressure`), so this IOCTL either becomes a no-op (shim opens event by name) or changes to accept a client event handle
+- `gb_madvise_req` and `gb_evict_req` are unchanged (use buf_id, not fd)
 
 **Validation:**
 - [ ] Project compiles (cmake generates solution / makefile)
@@ -459,6 +482,8 @@ static CUresult gb_alloc_from_driver(void **devPtr, size_t size)
 
     *devPtr = (void*)dptr;
     // Track in hash table for cleanup
+    // Note: Windows version stores HANDLE (req.handle) instead of int fd
+    // The gb_ht_entry_t struct needs fd field changed to HANDLE type
     ht_insert(dptr, size, 0, req.bufId, mappedPtr, req.handle);
     return CUDA_SUCCESS;
 }
@@ -661,3 +686,4 @@ These are the most important functions from the Linux source. Each needs a Windo
 | `ht_insert/ht_remove` | Track allocations | Direct port (platform-independent) |
 | `cuDeviceTotalMem_v2` hook | Report extended VRAM | Same hook via Detours |
 | `gb_open_device()` | Open /dev/greenboost | `CreateFileW(L"\\\\.\\GreenBoost")` |
+| `gb_pin_user_buf()` | Pin user pages (FOLL_LONGTERM) | `MmProbeAndLockPages` on MDL from user VA |

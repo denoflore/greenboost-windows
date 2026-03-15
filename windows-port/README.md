@@ -32,7 +32,21 @@ Same CUDA calls. Different backing memory source. Everything else is plumbing.
 
 ## Status
 
-**In Development** -- See `windows-port/CC_INSTRUCTIONS.md` for the full build spec.
+**In Development** — See `CC_INSTRUCTIONS.md` in this directory for the full 6-phase build spec.
+
+## Key Differences from Linux
+
+| Aspect | Linux | Windows |
+|--------|-------|---------|
+| Kernel module | `greenboost.ko` (char device) | `greenboost.sys` (KMDF driver) |
+| Device path | `/dev/greenboost` | `\\.\GreenBoost` |
+| Memory export | DMA-BUF fd | NT section handle |
+| CUDA import | `mmap(fd)` → `cuMemHostRegister` | `MapViewOfFile(handle)` → `cuMemHostRegister` |
+| Shim injection | `LD_PRELOAD` + `dlsym` hook | Microsoft Detours (MIT) or proxy DLL |
+| Watchdog thread | `kthread_run` | `PsCreateSystemThread` |
+| Pressure signal | `eventfd` | Named kernel event |
+| Config | Module params | Registry keys |
+| Signing | N/A (GPL module) | Test-signed (dev) / attestation-signed (prod) |
 
 ## Original Project
 

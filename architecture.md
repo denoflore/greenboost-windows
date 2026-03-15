@@ -169,7 +169,7 @@ instead of the T2 DDR4 pool.
 | `GB_ALLOC_WEIGHTS` | `1 << 0` | Model weights (hint: prefer T2, frozen) |
 | `GB_ALLOC_KV_CACHE` | `1 << 1` | KV cache (hint: hot, don't evict) |
 | `GB_ALLOC_ACTIVATIONS` | `1 << 2` | Activations (short-lived) |
-| `GB_ALLOC_FROZEN` | `1 << 3` | Cold page — eligible for T3 eviction |
+| `GB_ALLOC_FROZEN` | `1 << 3` | Pin in T2 — never evict while frozen |
 | `GB_ALLOC_NO_HUGEPAGE` | `1 << 4` | Force 4K pages (fragmented regions) |
 
 ---
