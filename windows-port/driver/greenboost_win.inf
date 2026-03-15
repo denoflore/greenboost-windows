@@ -1,0 +1,84 @@
+; SPDX-License-Identifier: GPL-2.0-only
+; Copyright (C) 2024-2026 Ferran Duarri
+; GreenBoost v2.3 — Windows KMDF Driver INF
+;
+; Install with:
+;   pnputil /add-driver greenboost_win.inf /install
+; Or:
+;   devcon install greenboost_win.inf Root\GreenBoost
+;
+; Requires test signing during development:
+;   bcdedit /set testsigning on
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider    = %ManufacturerName%
+CatalogFile = greenboost_win.cat
+DriverVer   = 03/15/2026,2.3.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13  ; Driver Store
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+greenboost_win.sys = 1,,
+
+; ----------------------------------------------------------------
+;  Manufacturer / Models
+; ----------------------------------------------------------------
+
+[Manufacturer]
+%ManufacturerName% = Standard,NTamd64
+
+[Standard.NTamd64]
+%DeviceDesc% = GreenBoost_Install, Root\GreenBoost
+
+; ----------------------------------------------------------------
+;  Install Section
+; ----------------------------------------------------------------
+
+[GreenBoost_Install.NT]
+CopyFiles = GreenBoost_CopyFiles
+
+[GreenBoost_CopyFiles]
+greenboost_win.sys
+
+[GreenBoost_Install.NT.Services]
+AddService = GreenBoost,%SPSVCINST_ASSOCSERVICE%,GreenBoost_Service
+
+; ----------------------------------------------------------------
+;  Service Section
+; ----------------------------------------------------------------
+
+[GreenBoost_Service]
+DisplayName    = %ServiceDesc%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\greenboost_win.sys
+
+; ----------------------------------------------------------------
+;  WDF Section
+; ----------------------------------------------------------------
+
+[GreenBoost_Install.NT.Wdf]
+KmdfService = GreenBoost, GreenBoost_wdfsect
+
+[GreenBoost_wdfsect]
+KmdfLibraryVersion = 1.33
+
+; ----------------------------------------------------------------
+;  Strings
+; ----------------------------------------------------------------
+
+[Strings]
+ManufacturerName = "GreenBoost"
+DeviceDesc       = "GreenBoost GPU Memory Extension"
+ServiceDesc      = "GreenBoost KMDF Driver — 3-Tier GPU Memory Pool"
+DiskName         = "GreenBoost Driver Installation Disk"
+SPSVCINST_ASSOCSERVICE = 0x00000002

@@ -1,0 +1,1019 @@
+/* SPDX-License-Identifier: GPL-2.0-only
+ * Copyright (C) 2024-2026 Ferran Duarri. Dual-licensed: GPL v2 + Commercial.
+ *
+ * GreenBoost v2.3 — Windows CUDA Shim DLL
+ *
+ * Intercepts CUDA memory allocations and routes large allocations to the
+ * GreenBoost KMDF driver, which provides system RAM (DDR4) and NVMe
+ * pagefile as extended GPU memory. Exposes combined VRAM + DDR4 pool
+ * to CUDA applications without code changes.
+ *
+ * Injection methods:
+ *   1. Microsoft Detours (recommended): withdll.exe /d:greenboost_cuda.dll app.exe
+ *   2. AppInit_DLLs registry key (development)
+ *   3. LM Studio/Ollama custom launcher script
+ *
+ * Port of the Linux greenboost_cuda_shim.c. Replaces:
+ *   - LD_PRELOAD + dlsym → Detours DetourAttach (or manual IAT patching)
+ *   - /dev/greenboost → \\.\GreenBoost via CreateFileW
+ *   - DMA-BUF fd + mmap → NT section handle + MapViewOfFile
+ *   - eventfd → Named event (GreenBoostPressure)
+ *   - pthread_mutex_t → CRITICAL_SECTION
+ *   - pthread_cond_t → CONDITION_VARIABLE
+ *   - madvise(MADV_WILLNEED) → PrefetchVirtualMemory
+ *
+ * Author  : Ferran Duarri
+ * License : GPL v2 (open-source) / Commercial — see LICENSE
+ */
+
+#include "greenboost_cuda_shim_win.h"
+#include <memoryapi.h>    /* PrefetchVirtualMemory */
+#include <psapi.h>
+
+#if GB_USE_DETOURS
+#  include <detours.h>
+#endif
+
+/* ================================================================== */
+/*  Globals                                                             */
+/* ================================================================== */
+
+gb_shim_config_t  gb_config = { 0 };
+gb_ht_entry_t     gb_htable[HT_SIZE];
+CRITICAL_SECTION  ht_locks[HT_LOCKS];
+
+/* Real function pointers (resolved at init) */
+static pfn_cudaMalloc           real_cudaMalloc          = NULL;
+static pfn_cudaFree             real_cudaFree            = NULL;
+static pfn_cudaMallocAsync      real_cudaMallocAsync     = NULL;
+static pfn_cudaMallocManaged    real_cudaMallocManaged   = NULL;
+static pfn_cudaMemGetInfo       real_cudaMemGetInfo      = NULL;
+static pfn_cuMemAlloc_v2        real_cuMemAlloc_v2       = NULL;
+static pfn_cuMemFree_v2         real_cuMemFree_v2        = NULL;
+static pfn_cuMemAllocAsync      real_cuMemAllocAsync     = NULL;
+static pfn_cuMemFreeAsync       real_cuMemFreeAsync      = NULL;
+static pfn_cuMemGetInfo         real_cuMemGetInfo        = NULL;
+static pfn_cuDeviceTotalMem_v2  real_cuDeviceTotalMem_v2 = NULL;
+static pfn_cuMemHostRegister    real_cuMemHostRegister   = NULL;
+static pfn_cuMemHostUnregister  real_cuMemHostUnregister = NULL;
+static pfn_cuMemHostGetDevicePointer real_cuMemHostGetDevicePointer = NULL;
+static pfn_nvmlDeviceGetMemoryInfo   real_nvmlDeviceGetMemoryInfo   = NULL;
+static pfn_nvmlDeviceGetMemoryInfo_v2 real_nvmlDeviceGetMemoryInfo_v2 = NULL;
+
+/* CUDA DLL handles */
+static HMODULE hCudaRT  = NULL;   /* cudart64_*.dll */
+static HMODULE hCudaDrv = NULL;   /* nvcuda.dll */
+static HMODULE hNvml    = NULL;   /* nvml.dll */
+
+/* ================================================================== */
+/*  Async prefetch worker (port of Linux prefetch_worker)               */
+/* ================================================================== */
+
+#define PREFETCH_QUEUE_SIZE 256
+
+typedef struct {
+    void  *ptr;
+    size_t size;
+} prefetch_req_t;
+
+static prefetch_req_t    prefetch_queue[PREFETCH_QUEUE_SIZE];
+static volatile int      prefetch_head = 0;
+static volatile int      prefetch_tail = 0;
+static CRITICAL_SECTION  prefetch_cs;
+static CONDITION_VARIABLE prefetch_cv;
+static HANDLE            prefetch_thread_handle = NULL;
+static volatile BOOL     prefetch_running = FALSE;
+
+/* PrefetchVirtualMemory function pointer (Win8+) */
+typedef BOOL (WINAPI *pfn_PrefetchVirtualMemory)(
+    HANDLE, ULONG_PTR, PWIN32_MEMORY_RANGE_ENTRY, ULONG);
+static pfn_PrefetchVirtualMemory pPrefetchVirtualMemory = NULL;
+
+static DWORD WINAPI prefetch_worker(LPVOID arg)
+{
+    (void)arg;
+
+    while (prefetch_running) {
+        prefetch_req_t req;
+
+        EnterCriticalSection(&prefetch_cs);
+        while (prefetch_head == prefetch_tail && prefetch_running) {
+            SleepConditionVariableCS(&prefetch_cv, &prefetch_cs, 1000);
+        }
+        if (!prefetch_running) {
+            LeaveCriticalSection(&prefetch_cs);
+            break;
+        }
+        req = prefetch_queue[prefetch_tail];
+        prefetch_tail = (prefetch_tail + 1) % PREFETCH_QUEUE_SIZE;
+        LeaveCriticalSection(&prefetch_cs);
+
+        /* Prefetch pages into RAM — Windows equivalent of madvise(MADV_WILLNEED) */
+        if (pPrefetchVirtualMemory && req.ptr && req.size > 0) {
+            WIN32_MEMORY_RANGE_ENTRY range;
+            range.VirtualAddress = req.ptr;
+            range.NumberOfBytes = req.size;
+            pPrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0);
+            gb_log("prefetch: PrefetchVirtualMemory on %p size=%zu", req.ptr, req.size);
+        }
+    }
+    return 0;
+}
+
+static void enqueue_prefetch(void *ptr, size_t size)
+{
+    if (!ptr || !prefetch_running)
+        return;
+
+    EnterCriticalSection(&prefetch_cs);
+    int next_head = (prefetch_head + 1) % PREFETCH_QUEUE_SIZE;
+    if (next_head != prefetch_tail) {
+        prefetch_queue[prefetch_head].ptr = ptr;
+        prefetch_queue[prefetch_head].size = size;
+        prefetch_head = next_head;
+        WakeConditionVariable(&prefetch_cv);
+    }
+    LeaveCriticalSection(&prefetch_cs);
+}
+
+/* ================================================================== */
+/*  Hash table — open-addressed with tombstone deletion                 */
+/* ================================================================== */
+
+static inline CRITICAL_SECTION *ht_lock_for(uint32_t h)
+{
+    return &ht_locks[h & (HT_LOCKS - 1u)];
+}
+
+/*
+ * Insert an entry. Returns 1 on success, 0 if table is full.
+ *
+ * Can reuse tombstone slots, which fixes the probe-chain bug from
+ * the Linux version (which used memset to zero, breaking chains).
+ */
+static int ht_insert(CUdeviceptr ptr, size_t size, int is_managed,
+                     int gb_buf_id, void *mapped_ptr, HANDLE section_handle)
+{
+    uint32_t h = ht_hash(ptr);
+    uint32_t i;
+
+    for (i = 0; i < HT_SIZE; i++) {
+        uint32_t idx = (h + i) & HT_MASK;
+        gb_ht_entry_t *e = &gb_htable[idx];
+        CRITICAL_SECTION *lk = ht_lock_for(idx);
+
+        EnterCriticalSection(lk);
+        if (e->ptr == HT_EMPTY || e->ptr == HT_TOMBSTONE) {
+            e->ptr            = ptr;
+            e->size           = size;
+            e->is_managed     = is_managed;
+            e->gb_buf_id      = gb_buf_id;
+            e->mapped_ptr     = mapped_ptr;
+            e->section_handle = section_handle;
+            LeaveCriticalSection(lk);
+            return 1;
+        }
+        LeaveCriticalSection(lk);
+    }
+    return 0;  /* table full */
+}
+
+/*
+ * Remove an entry. Returns 1 if found, fills output params.
+ * Uses tombstone marker instead of zeroing to preserve probe chains.
+ */
+static int ht_remove(CUdeviceptr ptr, size_t *out_size, int *out_managed,
+                     void **out_mapped_ptr, HANDLE *out_section_handle)
+{
+    uint32_t h = ht_hash(ptr);
+    uint32_t i;
+
+    for (i = 0; i < HT_SIZE; i++) {
+        uint32_t idx = (h + i) & HT_MASK;
+        gb_ht_entry_t *e = &gb_htable[idx];
+        CRITICAL_SECTION *lk = ht_lock_for(idx);
+
+        EnterCriticalSection(lk);
+
+        if (e->ptr == HT_EMPTY) {
+            /* Empty slot — key not present in table */
+            LeaveCriticalSection(lk);
+            break;
+        }
+
+        if (e->ptr == ptr) {
+            /* Found it */
+            if (out_size)           *out_size           = e->size;
+            if (out_managed)        *out_managed        = e->is_managed;
+            if (out_mapped_ptr)     *out_mapped_ptr     = e->mapped_ptr;
+            if (out_section_handle) *out_section_handle = e->section_handle;
+
+            /* Mark as tombstone — probing continues past this slot */
+            e->ptr            = HT_TOMBSTONE;
+            e->size           = 0;
+            e->is_managed     = 0;
+            e->gb_buf_id      = -1;
+            e->mapped_ptr     = NULL;
+            e->section_handle = NULL;
+
+            LeaveCriticalSection(lk);
+            return 1;
+        }
+
+        LeaveCriticalSection(lk);
+        /* Tombstone slots don't stop the probe — continue searching */
+    }
+    return 0;
+}
+
+/* Lookup without removal */
+static int ht_lookup(CUdeviceptr ptr, gb_ht_entry_t *out)
+{
+    uint32_t h = ht_hash(ptr);
+    uint32_t i;
+
+    for (i = 0; i < HT_SIZE; i++) {
+        uint32_t idx = (h + i) & HT_MASK;
+        gb_ht_entry_t *e = &gb_htable[idx];
+        CRITICAL_SECTION *lk = ht_lock_for(idx);
+
+        EnterCriticalSection(lk);
+
+        if (e->ptr == HT_EMPTY) {
+            LeaveCriticalSection(lk);
+            break;
+        }
+        if (e->ptr == ptr) {
+            if (out) *out = *e;
+            LeaveCriticalSection(lk);
+            return 1;
+        }
+
+        LeaveCriticalSection(lk);
+    }
+    return 0;
+}
+
+/* ================================================================== */
+/*  Driver communication                                                */
+/* ================================================================== */
+
+static HANDLE gb_open_device(void)
+{
+    if (gb_config.DeviceHandle != INVALID_HANDLE_VALUE)
+        return gb_config.DeviceHandle;
+
+    gb_config.DeviceHandle = CreateFileW(
+        L"\\\\.\\GreenBoost",
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL);
+
+    if (gb_config.DeviceHandle == INVALID_HANDLE_VALUE) {
+        gb_log("failed to open \\\\.\\GreenBoost (err=%lu)", GetLastError());
+    } else {
+        gb_log("opened \\\\.\\GreenBoost");
+    }
+
+    return gb_config.DeviceHandle;
+}
+
+static void gb_close_device(void)
+{
+    if (gb_config.DeviceHandle != INVALID_HANDLE_VALUE) {
+        CloseHandle(gb_config.DeviceHandle);
+        gb_config.DeviceHandle = INVALID_HANDLE_VALUE;
+    }
+}
+
+/*
+ * Allocate memory from the GreenBoost driver and register it with CUDA.
+ *
+ * Flow: DeviceIoControl(ALLOC) → MapViewOfFile(section) →
+ *       cuMemHostRegister(DEVICEMAP) → cuMemHostGetDevicePointer
+ *
+ * On any failure, returns non-zero and the caller falls through to
+ * real CUDA allocation.
+ */
+static CUresult gb_alloc_from_driver(void **devPtr, size_t size)
+{
+    HANDLE hDev;
+    struct gb_alloc_req_win req = { 0 };
+    struct gb_alloc_req_win resp = { 0 };
+    DWORD bytesReturned;
+    BOOL ok;
+    PVOID mappedPtr;
+    CUresult ret;
+    CUdeviceptr dptr;
+
+    hDev = gb_open_device();
+    if (hDev == INVALID_HANDLE_VALUE)
+        return CUDA_ERROR_NOT_SUPPORTED;
+
+    req.size = (gb_u64)size;
+    req.flags = GB_ALLOC_WEIGHTS;
+
+    ok = DeviceIoControl(hDev, GB_IOCTL_ALLOC,
+                         &req, sizeof(req),
+                         &resp, sizeof(resp),
+                         &bytesReturned, NULL);
+    if (!ok) {
+        gb_log("IOCTL_ALLOC failed (err=%lu) for %zuMB",
+               GetLastError(), size >> 20);
+        return CUDA_ERROR_NOT_SUPPORTED;
+    }
+
+    gb_log("driver allocated %lluMB (id=%d handle=%p)",
+           (unsigned long long)resp.size >> 20, resp.buf_id, resp.handle);
+
+    /* Map the shared section into our address space */
+    mappedPtr = MapViewOfFile(resp.handle,
+                              FILE_MAP_ALL_ACCESS,
+                              0, 0,
+                              (SIZE_T)resp.size);
+    if (!mappedPtr) {
+        gb_log_err("MapViewOfFile failed (err=%lu)", GetLastError());
+        CloseHandle(resp.handle);
+        return CUDA_ERROR_NOT_SUPPORTED;
+    }
+
+    gb_log("mapped %lluMB at %p", (unsigned long long)resp.size >> 20, mappedPtr);
+
+    /* Register with CUDA as device-mappable host memory */
+    if (!real_cuMemHostRegister) {
+        gb_log_err("cuMemHostRegister not resolved — cannot register host memory");
+        UnmapViewOfFile(mappedPtr);
+        CloseHandle(resp.handle);
+        return CUDA_ERROR_NOT_SUPPORTED;
+    }
+
+    ret = real_cuMemHostRegister(mappedPtr, (size_t)resp.size,
+                                 CU_MEMHOSTREGISTER_DEVICEMAP);
+    if (ret != CUDA_SUCCESS) {
+        gb_log_err("cuMemHostRegister failed: %d", ret);
+        UnmapViewOfFile(mappedPtr);
+        CloseHandle(resp.handle);
+        return ret;
+    }
+
+    /* Get the device-visible pointer */
+    ret = real_cuMemHostGetDevicePointer(&dptr, mappedPtr, 0);
+    if (ret != CUDA_SUCCESS) {
+        gb_log_err("cuMemHostGetDevicePointer failed: %d", ret);
+        real_cuMemHostUnregister(mappedPtr);
+        UnmapViewOfFile(mappedPtr);
+        CloseHandle(resp.handle);
+        return ret;
+    }
+
+    *devPtr = (void *)(uintptr_t)dptr;
+
+    /* Track in hash table for cleanup on cudaFree */
+    if (!ht_insert(dptr, (size_t)resp.size, 0, resp.buf_id,
+                   mappedPtr, resp.handle)) {
+        gb_log_err("hash table full — leaking allocation");
+    }
+
+    /* Enqueue prefetch to bring pages into RAM proactively */
+    enqueue_prefetch(mappedPtr, (size_t)resp.size);
+
+    gb_log("GreenBoost alloc: %zuMB → device ptr %p (buf_id=%d)",
+           size >> 20, *devPtr, resp.buf_id);
+
+    return CUDA_SUCCESS;
+}
+
+/*
+ * Free a GreenBoost-allocated buffer. Unregisters from CUDA,
+ * unmaps the view, and closes the section handle.
+ */
+static int gb_free_buffer(CUdeviceptr ptr)
+{
+    size_t size;
+    int is_managed;
+    void *mapped_ptr;
+    HANDLE section_handle;
+
+    if (!ht_remove(ptr, &size, &is_managed, &mapped_ptr, &section_handle))
+        return 0;  /* Not our allocation */
+
+    gb_log("freeing GreenBoost buffer: ptr=%p size=%zuMB",
+           (void *)(uintptr_t)ptr, size >> 20);
+
+    /* Unregister from CUDA */
+    if (mapped_ptr && real_cuMemHostUnregister) {
+        real_cuMemHostUnregister(mapped_ptr);
+    }
+
+    /* Unmap the view */
+    if (mapped_ptr) {
+        UnmapViewOfFile(mapped_ptr);
+    }
+
+    /* Close the section handle — triggers driver-side buffer free */
+    if (section_handle) {
+        CloseHandle(section_handle);
+    }
+
+    return 1;
+}
+
+/* ================================================================== */
+/*  CUDA hook implementations                                           */
+/* ================================================================== */
+
+static cudaError_t CUDAAPI hooked_cudaMalloc(void **devPtr, size_t size)
+{
+    /* Only intercept allocations above threshold */
+    if (size >= gb_config.ThresholdBytes && gb_config.Initialized) {
+        CUresult ret = gb_alloc_from_driver(devPtr, size);
+        if (ret == CUDA_SUCCESS)
+            return (cudaError_t)CUDA_SUCCESS;
+        /* Fall through to real CUDA on failure */
+        gb_log("GreenBoost alloc failed, falling through to real cudaMalloc");
+    }
+    return real_cudaMalloc(devPtr, size);
+}
+
+static cudaError_t CUDAAPI hooked_cudaFree(void *devPtr)
+{
+    if (devPtr && gb_free_buffer((CUdeviceptr)(uintptr_t)devPtr))
+        return (cudaError_t)CUDA_SUCCESS;
+    return real_cudaFree(devPtr);
+}
+
+static cudaError_t CUDAAPI hooked_cudaMallocAsync(
+    void **devPtr, size_t size, cudaStream_t stream)
+{
+    if (size >= gb_config.ThresholdBytes && gb_config.Initialized) {
+        CUresult ret = gb_alloc_from_driver(devPtr, size);
+        if (ret == CUDA_SUCCESS)
+            return (cudaError_t)CUDA_SUCCESS;
+    }
+    return real_cudaMallocAsync(devPtr, size, stream);
+}
+
+static CUresult CUDAAPI hooked_cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
+{
+    if (bytesize >= gb_config.ThresholdBytes && gb_config.Initialized) {
+        void *ptr;
+        CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
+        if (ret == CUDA_SUCCESS) {
+            *dptr = (CUdeviceptr)(uintptr_t)ptr;
+            return CUDA_SUCCESS;
+        }
+    }
+    return real_cuMemAlloc_v2(dptr, bytesize);
+}
+
+static CUresult CUDAAPI hooked_cuMemFree_v2(CUdeviceptr dptr)
+{
+    if (dptr && gb_free_buffer(dptr))
+        return CUDA_SUCCESS;
+    return real_cuMemFree_v2(dptr);
+}
+
+static CUresult CUDAAPI hooked_cuMemAllocAsync(
+    CUdeviceptr *dptr, size_t bytesize, CUstream hStream)
+{
+    if (bytesize >= gb_config.ThresholdBytes && gb_config.Initialized) {
+        void *ptr;
+        CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
+        if (ret == CUDA_SUCCESS) {
+            *dptr = (CUdeviceptr)(uintptr_t)ptr;
+            return CUDA_SUCCESS;
+        }
+    }
+    return real_cuMemAllocAsync(dptr, bytesize, hStream);
+}
+
+static CUresult CUDAAPI hooked_cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream)
+{
+    if (dptr && gb_free_buffer(dptr))
+        return CUDA_SUCCESS;
+    return real_cuMemFreeAsync(dptr, hStream);
+}
+
+/* ================================================================== */
+/*  VRAM spoofing hooks — report extended memory                        */
+/* ================================================================== */
+
+static CUresult CUDAAPI hooked_cuDeviceTotalMem_v2(size_t *bytes, CUdevice dev)
+{
+    CUresult ret = real_cuDeviceTotalMem_v2(bytes, dev);
+    if (ret == CUDA_SUCCESS && gb_config.Initialized) {
+        size_t original = *bytes;
+        *bytes = gb_config.ReportedTotalVram;
+        gb_log("cuDeviceTotalMem: %zuMB → %zuMB (spoofed)",
+               original >> 20, *bytes >> 20);
+    }
+    return ret;
+}
+
+static cudaError_t CUDAAPI hooked_cudaMemGetInfo(size_t *free, size_t *total)
+{
+    cudaError_t ret = real_cudaMemGetInfo(free, total);
+    if (ret == (cudaError_t)CUDA_SUCCESS && gb_config.Initialized) {
+        size_t orig_total = *total;
+        size_t orig_free = *free;
+        *total = gb_config.ReportedTotalVram;
+        /* Add the DDR4 pool available to free */
+        *free = orig_free + (gb_config.ReportedTotalVram - orig_total);
+        gb_log("cudaMemGetInfo: total %zuMB→%zuMB free %zuMB→%zuMB",
+               orig_total >> 20, *total >> 20,
+               orig_free >> 20, *free >> 20);
+    }
+    return ret;
+}
+
+static CUresult CUDAAPI hooked_cuMemGetInfo(size_t *free, size_t *total)
+{
+    CUresult ret = real_cuMemGetInfo(free, total);
+    if (ret == CUDA_SUCCESS && gb_config.Initialized) {
+        size_t orig_total = *total;
+        size_t orig_free = *free;
+        *total = gb_config.ReportedTotalVram;
+        *free = orig_free + (gb_config.ReportedTotalVram - orig_total);
+        gb_log("cuMemGetInfo: total %zuMB→%zuMB free %zuMB→%zuMB",
+               orig_total >> 20, *total >> 20,
+               orig_free >> 20, *free >> 20);
+    }
+    return ret;
+}
+
+/* NVML spoofing */
+static nvmlReturn_t hooked_nvmlDeviceGetMemoryInfo(
+    nvmlDevice_t device, nvmlMemory_t *memory)
+{
+    nvmlReturn_t ret = real_nvmlDeviceGetMemoryInfo(device, memory);
+    if (ret == NVML_SUCCESS && gb_config.Initialized) {
+        memory->total = (unsigned long long)gb_config.ReportedTotalVram;
+        memory->free = memory->total - memory->used;
+        gb_log("nvmlDeviceGetMemoryInfo: total=%lluMB",
+               memory->total >> 20);
+    }
+    return ret;
+}
+
+static nvmlReturn_t hooked_nvmlDeviceGetMemoryInfo_v2(
+    nvmlDevice_t device, nvmlMemory_v2_t *memory)
+{
+    nvmlReturn_t ret = real_nvmlDeviceGetMemoryInfo_v2(device, memory);
+    if (ret == NVML_SUCCESS && gb_config.Initialized) {
+        memory->total = (unsigned long long)gb_config.ReportedTotalVram;
+        memory->free = memory->total - memory->used;
+        gb_log("nvmlDeviceGetMemoryInfo_v2: total=%lluMB",
+               memory->total >> 20);
+    }
+    return ret;
+}
+
+/* ================================================================== */
+/*  Configuration — read from registry                                  */
+/* ================================================================== */
+
+static void gb_read_config(void)
+{
+    HKEY hKey;
+    DWORD type, size, value;
+    LONG result;
+
+    /* Defaults */
+    gb_config.PhysicalVramGb = 12;
+    gb_config.VirtualVramGb  = 51;
+    gb_config.ThresholdMb    = 256;
+    gb_config.DebugMode      = 0;
+
+    /* Check environment variables first (override registry) */
+    {
+        const char *env;
+        env = getenv("GREENBOOST_DEBUG");
+        if (env && env[0] == '1')
+            gb_config.DebugMode = 1;
+
+        env = getenv("GREENBOOST_THRESHOLD_MB");
+        if (env) {
+            int v = atoi(env);
+            if (v > 0)
+                gb_config.ThresholdMb = (ULONG)v;
+        }
+    }
+
+    /* Read from registry */
+    result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\GreenBoost",
+                           0, KEY_READ, &hKey);
+    if (result != ERROR_SUCCESS)
+        goto done;
+
+    size = sizeof(value);
+    if (RegQueryValueExA(hKey, "PhysicalVramGb", NULL, &type,
+                         (LPBYTE)&value, &size) == ERROR_SUCCESS && type == REG_DWORD)
+        gb_config.PhysicalVramGb = value;
+
+    size = sizeof(value);
+    if (RegQueryValueExA(hKey, "VirtualVramGb", NULL, &type,
+                         (LPBYTE)&value, &size) == ERROR_SUCCESS && type == REG_DWORD)
+        gb_config.VirtualVramGb = value;
+
+    size = sizeof(value);
+    if (RegQueryValueExA(hKey, "ThresholdMb", NULL, &type,
+                         (LPBYTE)&value, &size) == ERROR_SUCCESS && type == REG_DWORD)
+        gb_config.ThresholdMb = value;
+
+    size = sizeof(value);
+    if (RegQueryValueExA(hKey, "DebugMode", NULL, &type,
+                         (LPBYTE)&value, &size) == ERROR_SUCCESS && type == REG_DWORD)
+        gb_config.DebugMode = value;
+
+    RegCloseKey(hKey);
+
+done:
+    gb_config.ThresholdBytes = (size_t)gb_config.ThresholdMb * 1024ULL * 1024ULL;
+    gb_config.ReportedTotalVram =
+        ((size_t)gb_config.PhysicalVramGb + (size_t)gb_config.VirtualVramGb)
+        * (1ULL << 30);
+    gb_config.DeviceHandle = INVALID_HANDLE_VALUE;
+
+    gb_log("config: physVRAM=%luGB virtVRAM=%luGB threshold=%luMB debug=%lu",
+           gb_config.PhysicalVramGb, gb_config.VirtualVramGb,
+           gb_config.ThresholdMb, gb_config.DebugMode);
+}
+
+/* ================================================================== */
+/*  Symbol resolution — load real CUDA functions                        */
+/* ================================================================== */
+
+static void gb_resolve_symbols(void)
+{
+    /*
+     * Load the CUDA driver API (nvcuda.dll) and runtime (cudart64_*.dll).
+     * We load by name — the system DLL search order will find NVIDIA's
+     * DLLs in their standard install location.
+     */
+    hCudaDrv = LoadLibraryA("nvcuda.dll");
+    if (!hCudaDrv) {
+        gb_log_err("failed to load nvcuda.dll");
+        return;
+    }
+
+    hCudaRT = LoadLibraryA("cudart64_12.dll");
+    if (!hCudaRT) {
+        /* Try without version suffix */
+        hCudaRT = LoadLibraryA("cudart64.dll");
+    }
+
+    hNvml = LoadLibraryA("nvml.dll");
+
+    /* Resolve driver API functions */
+    real_cuMemAlloc_v2 = (pfn_cuMemAlloc_v2)
+        GetProcAddress(hCudaDrv, "cuMemAlloc_v2");
+    real_cuMemFree_v2 = (pfn_cuMemFree_v2)
+        GetProcAddress(hCudaDrv, "cuMemFree_v2");
+    real_cuMemAllocAsync = (pfn_cuMemAllocAsync)
+        GetProcAddress(hCudaDrv, "cuMemAllocAsync");
+    real_cuMemFreeAsync = (pfn_cuMemFreeAsync)
+        GetProcAddress(hCudaDrv, "cuMemFreeAsync");
+    real_cuMemGetInfo = (pfn_cuMemGetInfo)
+        GetProcAddress(hCudaDrv, "cuMemGetInfo_v2");
+    real_cuDeviceTotalMem_v2 = (pfn_cuDeviceTotalMem_v2)
+        GetProcAddress(hCudaDrv, "cuDeviceTotalMem_v2");
+    real_cuMemHostRegister = (pfn_cuMemHostRegister)
+        GetProcAddress(hCudaDrv, "cuMemHostRegister_v2");
+    real_cuMemHostUnregister = (pfn_cuMemHostUnregister)
+        GetProcAddress(hCudaDrv, "cuMemHostUnregister");
+    real_cuMemHostGetDevicePointer = (pfn_cuMemHostGetDevicePointer)
+        GetProcAddress(hCudaDrv, "cuMemHostGetDevicePointer_v2");
+
+    /* Resolve runtime API functions */
+    if (hCudaRT) {
+        real_cudaMalloc = (pfn_cudaMalloc)
+            GetProcAddress(hCudaRT, "cudaMalloc");
+        real_cudaFree = (pfn_cudaFree)
+            GetProcAddress(hCudaRT, "cudaFree");
+        real_cudaMallocAsync = (pfn_cudaMallocAsync)
+            GetProcAddress(hCudaRT, "cudaMallocAsync");
+        real_cudaMallocManaged = (pfn_cudaMallocManaged)
+            GetProcAddress(hCudaRT, "cudaMallocManaged");
+        real_cudaMemGetInfo = (pfn_cudaMemGetInfo)
+            GetProcAddress(hCudaRT, "cudaMemGetInfo");
+    }
+
+    /* Resolve NVML functions */
+    if (hNvml) {
+        real_nvmlDeviceGetMemoryInfo = (pfn_nvmlDeviceGetMemoryInfo)
+            GetProcAddress(hNvml, "nvmlDeviceGetMemoryInfo");
+        real_nvmlDeviceGetMemoryInfo_v2 = (pfn_nvmlDeviceGetMemoryInfo_v2)
+            GetProcAddress(hNvml, "nvmlDeviceGetMemoryInfo_v2");
+    }
+
+    /* Resolve PrefetchVirtualMemory (Win8+) */
+    {
+        HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
+        if (hKernel32) {
+            pPrefetchVirtualMemory = (pfn_PrefetchVirtualMemory)
+                GetProcAddress(hKernel32, "PrefetchVirtualMemory");
+        }
+    }
+
+    gb_log("symbols resolved: cuMemAlloc=%p cudaMalloc=%p cuMemHostRegister=%p",
+           (void*)real_cuMemAlloc_v2, (void*)real_cudaMalloc,
+           (void*)real_cuMemHostRegister);
+}
+
+/* ================================================================== */
+/*  Hook installation                                                   */
+/* ================================================================== */
+
+#if GB_USE_DETOURS
+
+static void gb_install_hooks(void)
+{
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+
+    if (real_cudaMalloc)
+        DetourAttach((PVOID*)&real_cudaMalloc, hooked_cudaMalloc);
+    if (real_cudaFree)
+        DetourAttach((PVOID*)&real_cudaFree, hooked_cudaFree);
+    if (real_cudaMallocAsync)
+        DetourAttach((PVOID*)&real_cudaMallocAsync, hooked_cudaMallocAsync);
+    if (real_cuMemAlloc_v2)
+        DetourAttach((PVOID*)&real_cuMemAlloc_v2, hooked_cuMemAlloc_v2);
+    if (real_cuMemFree_v2)
+        DetourAttach((PVOID*)&real_cuMemFree_v2, hooked_cuMemFree_v2);
+    if (real_cuMemAllocAsync)
+        DetourAttach((PVOID*)&real_cuMemAllocAsync, hooked_cuMemAllocAsync);
+    if (real_cuMemFreeAsync)
+        DetourAttach((PVOID*)&real_cuMemFreeAsync, hooked_cuMemFreeAsync);
+    if (real_cuDeviceTotalMem_v2)
+        DetourAttach((PVOID*)&real_cuDeviceTotalMem_v2, hooked_cuDeviceTotalMem_v2);
+    if (real_cudaMemGetInfo)
+        DetourAttach((PVOID*)&real_cudaMemGetInfo, hooked_cudaMemGetInfo);
+    if (real_cuMemGetInfo)
+        DetourAttach((PVOID*)&real_cuMemGetInfo, hooked_cuMemGetInfo);
+    if (real_nvmlDeviceGetMemoryInfo)
+        DetourAttach((PVOID*)&real_nvmlDeviceGetMemoryInfo,
+                     hooked_nvmlDeviceGetMemoryInfo);
+    if (real_nvmlDeviceGetMemoryInfo_v2)
+        DetourAttach((PVOID*)&real_nvmlDeviceGetMemoryInfo_v2,
+                     hooked_nvmlDeviceGetMemoryInfo_v2);
+
+    LONG err = DetourTransactionCommit();
+    if (err != NO_ERROR) {
+        gb_log_err("DetourTransactionCommit failed: %ld", err);
+    } else {
+        gb_log("hooks installed via Detours");
+    }
+}
+
+static void gb_remove_hooks(void)
+{
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+
+    if (real_cudaMalloc)
+        DetourDetach((PVOID*)&real_cudaMalloc, hooked_cudaMalloc);
+    if (real_cudaFree)
+        DetourDetach((PVOID*)&real_cudaFree, hooked_cudaFree);
+    if (real_cudaMallocAsync)
+        DetourDetach((PVOID*)&real_cudaMallocAsync, hooked_cudaMallocAsync);
+    if (real_cuMemAlloc_v2)
+        DetourDetach((PVOID*)&real_cuMemAlloc_v2, hooked_cuMemAlloc_v2);
+    if (real_cuMemFree_v2)
+        DetourDetach((PVOID*)&real_cuMemFree_v2, hooked_cuMemFree_v2);
+    if (real_cuMemAllocAsync)
+        DetourDetach((PVOID*)&real_cuMemAllocAsync, hooked_cuMemAllocAsync);
+    if (real_cuMemFreeAsync)
+        DetourDetach((PVOID*)&real_cuMemFreeAsync, hooked_cuMemFreeAsync);
+    if (real_cuDeviceTotalMem_v2)
+        DetourDetach((PVOID*)&real_cuDeviceTotalMem_v2, hooked_cuDeviceTotalMem_v2);
+    if (real_cudaMemGetInfo)
+        DetourDetach((PVOID*)&real_cudaMemGetInfo, hooked_cudaMemGetInfo);
+    if (real_cuMemGetInfo)
+        DetourDetach((PVOID*)&real_cuMemGetInfo, hooked_cuMemGetInfo);
+    if (real_nvmlDeviceGetMemoryInfo)
+        DetourDetach((PVOID*)&real_nvmlDeviceGetMemoryInfo,
+                     hooked_nvmlDeviceGetMemoryInfo);
+    if (real_nvmlDeviceGetMemoryInfo_v2)
+        DetourDetach((PVOID*)&real_nvmlDeviceGetMemoryInfo_v2,
+                     hooked_nvmlDeviceGetMemoryInfo_v2);
+
+    DetourTransactionCommit();
+    gb_log("hooks removed");
+}
+
+#else /* Manual IAT hooking fallback */
+
+/*
+ * IAT (Import Address Table) hooking: patch the function pointer in
+ * the target module's IAT to point to our hook instead of the real
+ * function. This works without Detours but is less robust.
+ */
+static void *gb_iat_hook(HMODULE module, const char *importModule,
+                         const char *funcName, void *hookFunc)
+{
+    PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)module;
+    PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)
+        ((BYTE*)module + dosHeader->e_lfanew);
+    PIMAGE_IMPORT_DESCRIPTOR imports = (PIMAGE_IMPORT_DESCRIPTOR)
+        ((BYTE*)module + ntHeaders->OptionalHeader.DataDirectory[
+            IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+    for (; imports->Name; imports++) {
+        const char *modName = (const char*)((BYTE*)module + imports->Name);
+        if (_stricmp(modName, importModule) != 0)
+            continue;
+
+        PIMAGE_THUNK_DATA origThunk = (PIMAGE_THUNK_DATA)
+            ((BYTE*)module + imports->OriginalFirstThunk);
+        PIMAGE_THUNK_DATA thunk = (PIMAGE_THUNK_DATA)
+            ((BYTE*)module + imports->FirstThunk);
+
+        for (; origThunk->u1.AddressOfData; origThunk++, thunk++) {
+            if (IMAGE_SNAP_BY_ORDINAL(origThunk->u1.Ordinal))
+                continue;
+
+            PIMAGE_IMPORT_BY_NAME importByName = (PIMAGE_IMPORT_BY_NAME)
+                ((BYTE*)module + origThunk->u1.AddressOfData);
+
+            if (strcmp(importByName->Name, funcName) != 0)
+                continue;
+
+            /* Found it — patch the IAT entry */
+            void *original = (void*)thunk->u1.Function;
+            DWORD oldProtect;
+            VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function),
+                           PAGE_READWRITE, &oldProtect);
+            thunk->u1.Function = (ULONG_PTR)hookFunc;
+            VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function),
+                           oldProtect, &oldProtect);
+            return original;
+        }
+    }
+    return NULL;
+}
+
+static void gb_install_hooks(void)
+{
+    /*
+     * IAT hooking: scan all loaded modules that import CUDA functions
+     * and patch their IAT entries. This is a simplified version —
+     * a production implementation would enumerate all modules.
+     */
+    HMODULE hProcess = GetModuleHandle(NULL);
+    if (!hProcess) return;
+
+    /* Hook in the main executable's IAT */
+    if (real_cudaMalloc) {
+        void *orig = gb_iat_hook(hProcess, "nvcuda.dll",
+                                 "cudaMalloc", hooked_cudaMalloc);
+        if (orig) real_cudaMalloc = (pfn_cudaMalloc)orig;
+    }
+    /* Additional IAT hooks would go here for other functions */
+
+    gb_log("hooks installed via IAT patching (limited — use Detours for full support)");
+}
+
+static void gb_remove_hooks(void)
+{
+    /* IAT hooks are automatically removed when the DLL unloads */
+    gb_log("IAT hooks released");
+}
+
+#endif /* GB_USE_DETOURS */
+
+/* ================================================================== */
+/*  Initialization and cleanup                                          */
+/* ================================================================== */
+
+static void gb_shim_init(void)
+{
+    UINT i;
+
+    gb_log("=== GreenBoost v2.3 CUDA Shim (Windows) ===");
+
+    /* Initialize hash table locks */
+    for (i = 0; i < HT_LOCKS; i++)
+        InitializeCriticalSectionAndSpinCount(&ht_locks[i], 4000);
+
+    /* Clear hash table */
+    memset(gb_htable, 0, sizeof(gb_htable));
+
+    /* Read configuration */
+    gb_read_config();
+
+    /* Resolve real CUDA symbols */
+    gb_resolve_symbols();
+
+    /* Validate we have the minimum required symbols */
+    if (!real_cuMemHostRegister || !real_cuMemHostGetDevicePointer) {
+        gb_log_err("critical CUDA symbols not found — shim disabled");
+        gb_config.Initialized = FALSE;
+        return;
+    }
+
+    /* Start prefetch worker thread */
+    InitializeCriticalSectionAndSpinCount(&prefetch_cs, 4000);
+    InitializeConditionVariable(&prefetch_cv);
+    prefetch_running = TRUE;
+    prefetch_thread_handle = CreateThread(NULL, 0, prefetch_worker, NULL, 0, NULL);
+    if (prefetch_thread_handle)
+        gb_log("prefetch worker started");
+
+    /* Open pressure event for monitoring */
+    gb_config.PressureEvent = OpenEventW(SYNCHRONIZE, FALSE,
+                                         L"GreenBoostPressure");
+    if (gb_config.PressureEvent)
+        gb_log("pressure event opened");
+
+    /* Install hooks */
+    gb_install_hooks();
+
+    gb_config.Initialized = TRUE;
+    gb_log("shim initialized — intercepting CUDA allocs >= %luMB",
+           gb_config.ThresholdMb);
+    gb_log("reported VRAM: %zuMB (%luGB phys + %luGB DDR4)",
+           gb_config.ReportedTotalVram >> 20,
+           gb_config.PhysicalVramGb,
+           gb_config.VirtualVramGb);
+}
+
+static void gb_shim_cleanup(void)
+{
+    UINT i;
+
+    gb_log("shutting down GreenBoost shim");
+
+    gb_config.Initialized = FALSE;
+
+    /* Remove hooks */
+    gb_remove_hooks();
+
+    /* Stop prefetch worker */
+    if (prefetch_thread_handle) {
+        prefetch_running = FALSE;
+        WakeConditionVariable(&prefetch_cv);
+        WaitForSingleObject(prefetch_thread_handle, 5000);
+        CloseHandle(prefetch_thread_handle);
+        prefetch_thread_handle = NULL;
+    }
+    DeleteCriticalSection(&prefetch_cs);
+
+    /* Free any remaining tracked allocations */
+    for (i = 0; i < HT_SIZE; i++) {
+        gb_ht_entry_t *e = &gb_htable[i];
+        if (e->ptr != HT_EMPTY && e->ptr != HT_TOMBSTONE) {
+            gb_log("cleanup: freeing leaked buffer ptr=%p size=%zu",
+                   (void*)(uintptr_t)e->ptr, e->size);
+            if (e->mapped_ptr && real_cuMemHostUnregister)
+                real_cuMemHostUnregister(e->mapped_ptr);
+            if (e->mapped_ptr)
+                UnmapViewOfFile(e->mapped_ptr);
+            if (e->section_handle)
+                CloseHandle(e->section_handle);
+        }
+    }
+
+    /* Close device and event handles */
+    gb_close_device();
+    if (gb_config.PressureEvent) {
+        CloseHandle(gb_config.PressureEvent);
+        gb_config.PressureEvent = NULL;
+    }
+
+    /* Cleanup hash table locks */
+    for (i = 0; i < HT_LOCKS; i++)
+        DeleteCriticalSection(&ht_locks[i]);
+
+    /* Unload CUDA libraries */
+    /* Note: Don't FreeLibrary on DLL_PROCESS_DETACH — it can cause
+     * loader lock issues. The process is terminating anyway. */
+
+    gb_log("shim shutdown complete");
+}
+
+/* ================================================================== */
+/*  DLL entry point                                                     */
+/* ================================================================== */
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
+{
+    (void)hModule;
+    (void)reserved;
+
+    switch (reason) {
+    case DLL_PROCESS_ATTACH:
+        DisableThreadLibraryCalls(hModule);
+        gb_shim_init();
+        break;
+
+    case DLL_PROCESS_DETACH:
+        gb_shim_cleanup();
+        break;
+    }
+
+    return TRUE;
+}
