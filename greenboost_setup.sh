@@ -417,11 +417,11 @@ cmd_load() {
 
     info "GreenBoost v2.3 loaded — 3-tier pool active!"
     info ""
-    info "  T1 RTX 5070 VRAM : ${phys} GB   ~336 GB/s  [hot layers]"
-    info "  T2 DDR4 pool     : ${virt} GB    ~50 GB/s  [cold layers]"
-    info "  T3 NVMe swap     : ${nvme_sw} GB  ~1.8 GB/s [frozen pages]"
+    info "  T1 ${GPU_NAME} : ${phys} GB  [hot layers]"
+    info "  T2 ${RAM_TYPE} pool         : ${virt} GB  [cold layers]"
+    info "  T3 NVMe swap               : ${nvme_sw} GB  [frozen pages]"
     info "  ─────────────────────────────────────────"
-    info "  Combined view    : $(( phys + virt + nvme_sw )) GB total model capacity"
+    info "  Combined view              : $(( phys + virt + nvme_sw )) GB total model capacity"
     info ""
     info "Pool info  : cat /sys/class/greenboost/greenboost/pool_info"
     info "Kernel log : dmesg | grep greenboost"
@@ -474,17 +474,18 @@ cmd_uninstall() {
 
 cmd_tune() {
     need_root tune
+    detect_hardware
 
     info "Tuning workstation for GreenBoost / LLM workloads..."
-    info "Hardware: i9-14900KF | RTX 5070 | DDR4-3600 | Samsung 990 EVO Plus"
+    info "Hardware: ${CPU_NAME} | ${GPU_NAME} | ${RAM_TYPE}-${RAM_SPEED_MT} | ${NVME_SIZE_GB} GB NVMe"
     echo ""
 
-    # ── CPU governor → performance (P-cores run at 6 GHz, not 800 MHz) ──
+    # ── CPU governor → performance (P-cores run at max boost, not idle) ──
     local changed=0
     for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
         [[ -w "$gov" ]] && echo performance > "$gov" && changed=1
     done
-    [[ $changed -eq 1 ]] && info "CPU governor      : performance (all 32 CPUs)" \
+    [[ $changed -eq 1 ]] && info "CPU governor      : performance ($(nproc) CPUs)" \
                           || warn "CPU governor      : could not set (check cpufreq driver)"
 
     # ── NVMe scheduler → none (best latency for Samsung 990 EVO Plus) ──
@@ -550,6 +551,7 @@ _grub_check_flag() {
 
 cmd_tune_grub() {
     need_root tune-grub
+    detect_hardware
 
     local grub_file="/etc/default/grub"
     local kver; kver="$(uname -r)"
@@ -557,7 +559,7 @@ cmd_tune_grub() {
 
     [[ -f "$grub_file" ]] || die "GRUB config not found: $grub_file"
 
-    info "Validating GRUB flags for: i9-14900KF | RTX 5070 | Samsung 990 EVO Plus"
+    info "Validating GRUB flags for: ${CPU_NAME} | ${GPU_NAME}"
     info "Kernel: $kver"
     echo ""
 
@@ -592,28 +594,32 @@ cmd_tune_grub() {
         "stagger timer ticks — reduces lock contention on hybrid P/E cores" "" \
         && new_flags="$new_flags skew_tick=1"
 
-    # ── Flag: rcu_nocbs=16-31 ───────────────────────────────────────────
-    # Offloads RCU (Read-Copy-Update) callback processing to E-cores
-    # (CPU 16-31, up to 4.4 GHz). Frees the 6 GHz P-cores (0-15) from
-    # RCU housekeeping during inference hot paths.
-    # Kernel check: CONFIG_RCU_NOCB_CPU=y (confirmed built-in).
-    _grub_check_flag "rcu_nocbs=16-31" \
-        "offload RCU callbacks to E-cores, freeing P-cores for inference" \
-        "CONFIG_RCU_NOCB_CPU" \
-        && new_flags="$new_flags rcu_nocbs=16-31"
+    # ── Flag: rcu_nocbs=<ecores> ─────────────────────────────────────────
+    # Offloads RCU (Read-Copy-Update) callback processing to E-cores or
+    # non-golden CPUs, freeing the high-frequency P-cores for inference.
+    # Range is derived from detected CPU topology (GB_PCORES_MAX).
+    if [[ $GB_PCORES_ONLY -eq 1 ]]; then
+        local ecores_start=$(( GB_PCORES_MAX + 1 ))
+        local ecores_end=$(( $(nproc) - 1 ))
+        if [[ $ecores_start -le $ecores_end ]]; then
+            _grub_check_flag "rcu_nocbs=${ecores_start}-${ecores_end}" \
+                "offload RCU callbacks to E-cores (CPU ${ecores_start}-${ecores_end}), freeing P-cores for inference" \
+                "CONFIG_RCU_NOCB_CPU" \
+                && new_flags="$new_flags rcu_nocbs=${ecores_start}-${ecores_end}"
+        fi
+    fi
 
-    # ── Flag: nohz_full=4-7 ─────────────────────────────────────────────
-    # Makes the 4 golden P-cores (CPU 4-7, core_id 8+12, 6 GHz TVB boost)
-    # tick-less when they have exactly one runnable thread. Combined with
-    # rcu_nocbs, this eliminates the 1000 Hz timer interrupt during dense
-    # matrix multiplications — directly reduces LLM token latency.
-    # Kernel check: CONFIG_NO_HZ_FULL=y (confirmed built-in).
-    # Safe: golden cores still handle regular tasks; tick resumes when
-    # idle or when >1 task is runnable.
-    _grub_check_flag "nohz_full=4-7" \
-        "tick-less golden P-cores during single-thread inference (i9 core_id 8+12)" \
-        "CONFIG_NO_HZ_FULL" \
-        && new_flags="$new_flags nohz_full=4-7"
+    # ── Flag: nohz_full=<golden> ─────────────────────────────────────────
+    # Makes the highest-frequency cores tick-less when they have exactly
+    # one runnable thread. Eliminates timer interrupts during dense matrix
+    # multiplications — reduces LLM token latency.
+    # Range derived from detected golden-core topology (GB_GOLDEN_MIN/MAX).
+    if [[ $GB_PCORES_ONLY -eq 1 && $GB_GOLDEN_MIN -lt $GB_GOLDEN_MAX ]]; then
+        _grub_check_flag "nohz_full=${GB_GOLDEN_MIN}-${GB_GOLDEN_MAX}" \
+            "tick-less golden P-cores (CPU ${GB_GOLDEN_MIN}-${GB_GOLDEN_MAX}) during single-thread inference" \
+            "CONFIG_NO_HZ_FULL" \
+            && new_flags="$new_flags nohz_full=${GB_GOLDEN_MIN}-${GB_GOLDEN_MAX}"
+    fi
 
     # ── Flag: numa_balancing=disable ────────────────────────────────────
     # This workstation has a single NUMA node (all CPUs on node 0).
@@ -684,17 +690,19 @@ cmd_tune_grub() {
 
 cmd_tune_sysctl() {
     need_root tune-sysctl
+    detect_hardware
 
     local dest="/etc/sysctl.d/99-zzz-greenboost.conf"
 
     info "Writing definitive sysctl config: $dest"
+    info "Hardware: ${CPU_NAME} | ${GPU_NAME} | ${total_ram_gb:-$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 ))} GB RAM | ${NVME_SIZE_GB} GB NVMe"
     info "This file loads last (99-zzz) and wins over all conflicting files."
     echo ""
 
     # Show conflicts found
     info "Conflicts resolved:"
     info "  vm.swappiness       : multiple files set 10/20 → final: 10"
-    info "  vm.dirty_ratio      : 15 vs 40 → final: 40 (Samsung 990 sustains 7 GB/s)"
+    info "  vm.dirty_ratio      : 15 vs 40 → final: 40"
     info "  vm.dirty_background_ratio: 5 vs 10 → final: 10"
     info "  kernel.sched_autogroup_enabled: 1 → 0 (bad for compute, groups by session)"
     info "New settings added:"
@@ -703,11 +711,14 @@ cmd_tune_sysctl() {
     info "  kernel.sched_wakeup_granularity_ns: 15000000 (reduces spurious wakeups)"
     echo ""
 
-    cat > "$dest" << 'SYSCTL_EOF'
-# GreenBoost v2.3 — Definitive sysctl config
-# Hardware: i9-14900KF | RTX 5070 | 64 GB DDR4-3600 | Samsung 990 EVO Plus 4 TB
-# Loaded last (99-zzz) — wins all conflicts with earlier sysctl.d files.
-# Do NOT edit other sysctl.d files; make changes here instead.
+    # Write the header line with detected hardware (variables don't expand in 'HEREDOC')
+    printf '# GreenBoost v2.3 — Definitive sysctl config\n' > "$dest"
+    printf '# Hardware: %s | %s | %s-%s | %s GB NVMe\n' \
+        "${CPU_NAME}" "${GPU_NAME}" "${RAM_TYPE}" "${RAM_SPEED_MT}" "${NVME_SIZE_GB}" >> "$dest"
+    printf '# Loaded last (99-zzz) — wins all conflicts with earlier sysctl.d files.\n' >> "$dest"
+    printf '# Do NOT edit other sysctl.d files; make changes here instead.\n' >> "$dest"
+
+    cat >> "$dest" << 'SYSCTL_EOF'
 
 # ── Swap / memory pressure ───────────────────────────────────────────────
 # Keep LLM weights in DDR4 (T2); only spill to NVMe (T3) under real pressure.
@@ -809,13 +820,14 @@ SYSCTL_EOF
 
 cmd_tune_libs() {
     need_root tune-libs
+    detect_hardware
 
-    info "Installing missing AI/compute libraries for i9-14900KF + RTX 5070..."
+    info "Installing missing AI/compute libraries for: ${CPU_NAME} | ${GPU_NAME}"
     echo ""
 
     # ── APT packages ──────────────────────────────────────────────────────
     local pkgs=(
-        # BLAS/LAPACK — OpenBLAS compiled with AVX2+FMA for CPU inference
+        # BLAS/LAPACK — OpenBLAS compiled with AVX2/FMA or equivalent
         libopenblas-dev
         libblas-dev
         liblapack-dev
@@ -838,16 +850,23 @@ cmd_tune_libs() {
         # nvtop — real-time GPU + CPU monitor (shows all 3 tiers at a glance)
         nvtop
 
-        # cpufrequtils — userspace CPU frequency tools (cpufreq-info, etc.)
+        # cpufrequtils — userspace CPU frequency tools
         cpufrequtils
 
-        # linux-tools — perf, turbostat (monitors P/E core frequencies + C-states)
+        # linux-tools — perf, turbostat (monitors core frequencies + C-states)
         linux-tools-generic
-
-        # intel-microcode — latest CPU microcode (fixes + performance patches
-        # for i9-14900KF Raptor Lake stepping)
-        intel-microcode
     )
+
+    # CPU vendor-specific microcode
+    local cpu_vendor
+    cpu_vendor=$(grep -m1 "vendor_id" /proc/cpuinfo | awk '{print $3}')
+    if [[ "$cpu_vendor" == "GenuineIntel" ]]; then
+        pkgs+=(intel-microcode)
+        info "CPU vendor: Intel — adding intel-microcode"
+    elif [[ "$cpu_vendor" == "AuthenticAMD" ]]; then
+        pkgs+=(amd64-microcode)
+        info "CPU vendor: AMD — adding amd64-microcode"
+    fi
 
     info "Packages to install:"
     local to_install=()
@@ -951,16 +970,20 @@ cmd_status() {
 }
 
 cmd_help() {
+    detect_hardware 2>/dev/null
     echo ""
     echo -e "${BLU}GreenBoost v2.3 — 3-Tier GPU Memory Pool${NC}"
     echo "Author : Ferran Duarri"
-    echo "Target : ASUS RTX 5070 12 GB + 64 GB DDR4-3600 + 4 TB Samsung 990 Evo Plus NVMe"
+    echo "CPU    : ${CPU_NAME}"
+    echo "GPU    : ${GPU_NAME}  (${GB_PHYS} GB VRAM)"
+    echo "RAM    : ${RAM_TYPE}-${RAM_SPEED_MT}  (pool ${GB_VIRT} GB)"
+    echo "NVMe   : ${NVME_SIZE_GB} GB  (swap ${GB_NVME_SWAP} GB)"
     echo ""
-    echo "  Tier 1  RTX 5070 VRAM      12 GB   ~336 GB/s  [hot layers]"
-    echo "  Tier 2  DDR4 pool          51 GB    ~50 GB/s  [cold layers, hugepages]"
-    echo "  Tier 3  NVMe swap          64 GB    ~1.8 GB/s  [frozen pages, swappable 4K]"
+    echo "  Tier 1  ${GPU_NAME}  ${GB_PHYS} GB  [hot layers]"
+    echo "  Tier 2  ${RAM_TYPE} pool           ${GB_VIRT} GB  [cold layers, hugepages]"
+    echo "  Tier 3  NVMe swap               ${GB_NVME_SWAP} GB  [frozen pages, swappable 4K]"
     echo "          ─────────────────────────────────────"
-    echo "          Combined capacity   75 GB (T3 expandable to 200+ GB)"
+    echo "          Combined capacity       $(( GB_PHYS + GB_VIRT + GB_NVME_SWAP )) GB"
     echo ""
     echo "USAGE:  sudo ./greenboost_setup.sh <command>"
     echo ""
@@ -985,12 +1008,12 @@ cmd_help() {
     echo "               Optimize LLM for max speed: TRT-LLM, LoRA, ExLlamaV3"
     echo "  help        Show this help"
     echo ""
-    echo "ENVIRONMENT (for load):"
-    echo "  GPU_PHYS_GB=12     Physical VRAM in GB          (RTX 5070 default: 12)"
-    echo "  VIRT_VRAM_GB=51    DDR4 pool size in GB         (default: 51, 80% of 64 GB)"
-    echo "  RESERVE_GB=12      System RAM to keep free      (default: 12)"
-    echo "  NVME_SWAP_GB=64    NVMe swap capacity in GB     (default: 64, auto-detected)"
-    echo "  NVME_POOL_GB=58    GreenBoost T3 soft cap in GB (default: 58)"
+    echo "ENVIRONMENT (for load, detected defaults shown):"
+    echo "  GPU_PHYS_GB=${GB_PHYS}     Physical VRAM in GB          (detected: ${GPU_NAME})"
+    echo "  VIRT_VRAM_GB=${GB_VIRT}    DDR4 pool size in GB         (detected: ${GB_VIRT} GB)"
+    echo "  RESERVE_GB=${GB_RESERVE}      System RAM to keep free      (detected: ${GB_RESERVE} GB)"
+    echo "  NVME_SWAP_GB=${GB_NVME_SWAP}    NVMe swap capacity in GB     (detected: ${GB_NVME_SWAP} GB)"
+    echo "  NVME_POOL_GB=${GB_NVME_POOL}    GreenBoost T3 soft cap in GB (detected: ${GB_NVME_POOL} GB)"
     echo ""
     echo "  Example: sudo VIRT_VRAM_GB=48 NVME_SWAP_GB=64 ./greenboost_setup.sh load"
     echo ""
@@ -1551,8 +1574,8 @@ cmd_optimize_model() {
     # ── LoRA fine-tuning ──────────────────────────────────────────────────
     if [[ "$strategy" == "lora" ]]; then
         _sect_opt "LoRA Fine-tuning (Unsloth)"
-        info "  Trains LoRA adapter on custom data. Fits 30B in 12 GB VRAM via 4-bit base."
-        info "  Peak VRAM: ~11.3 GB  |  Training time: ~2-4h on RTX 5070"
+        info "  Trains LoRA adapter on custom data. Fits 30B in ${GB_PHYS} GB VRAM via 4-bit base."
+        info "  GPU: ${GPU_NAME}  (${GB_PHYS} GB VRAM)"
         echo ""
         if [[ -n "$hf_model" && -n "$lora_data" ]]; then
             local py="${venv_dir}/bin/python"
@@ -1762,9 +1785,11 @@ cmd_diagnose() {
     fi
 
     local nthreads; nthreads=$(echo "$env_str" | grep -oP 'OLLAMA_NUM_THREADS=\d+' | cut -d= -f2 | head -1)
-    _info "OLLAMA_NUM_THREADS=${nthreads:-default}  (i9-14900KF: 8=P-cores-only, 16=P+E)"
-    if [[ -n "$nthreads" && "$nthreads" -gt 16 ]]; then
-        _rec "OLLAMA_NUM_THREADS=${nthreads} — try 8 (P-cores only, 6GHz) or 16 (P+E mix)"
+    local pcores_count=$(( GB_PCORES_MAX + 1 ))
+    local total_cpus_detected; total_cpus_detected=$(nproc)
+    _info "OLLAMA_NUM_THREADS=${nthreads:-default}  (detected: ${pcores_count}=P-cores-only, ${total_cpus_detected}=all CPUs)"
+    if [[ -n "$nthreads" && "$nthreads" -gt "$total_cpus_detected" ]]; then
+        _rec "OLLAMA_NUM_THREADS=${nthreads} exceeds CPU count — try ${pcores_count} (P-cores only) or ${total_cpus_detected} (all CPUs)"
     fi
 
     # ═══════════════════════════════════════════════════════════════════════

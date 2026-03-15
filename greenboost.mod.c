@@ -18,6 +18,8 @@ __section(".gnu.linkonce.this_module") = {
 
 static const struct modversion_info ____versions[]
 __used __section("__versions") = {
+	{ 0xd648ae19, "sg_free_table" },
+	{ 0xcb8b6ec6, "kfree" },
 	{ 0xf1de9e85, "vunmap" },
 	{ 0xf46d5bf3, "mutex_init_generic" },
 	{ 0x9f222e1e, "alloc_chrdev_region" },
@@ -93,15 +95,17 @@ __used __section("__versions") = {
 	{ 0x18ded256, "eventfd_signal_mask" },
 	{ 0xd272d446, "__stack_chk_fail" },
 	{ 0xdd6830c7, "sysfs_emit" },
+	{ 0xfdfc89f8, "dmi_get_system_info" },
 	{ 0x2182515b, "__num_online_cpus" },
+	{ 0xb1ad3f2f, "boot_cpu_data" },
 	{ 0x16402e05, "dma_unmap_sg_attrs" },
-	{ 0xd648ae19, "sg_free_table" },
-	{ 0xcb8b6ec6, "kfree" },
 	{ 0x5f8848a0, "module_layout" },
 };
 
 static const u32 ____version_ext_crcs[]
 __used __section("__version_ext_crcs") = {
+	0xd648ae19,
+	0xcb8b6ec6,
 	0xf1de9e85,
 	0xf46d5bf3,
 	0x9f222e1e,
@@ -177,14 +181,16 @@ __used __section("__version_ext_crcs") = {
 	0x18ded256,
 	0xd272d446,
 	0xdd6830c7,
+	0xfdfc89f8,
 	0x2182515b,
+	0xb1ad3f2f,
 	0x16402e05,
-	0xd648ae19,
-	0xcb8b6ec6,
 	0x5f8848a0,
 };
 static const char ____version_ext_names[]
 __used __section("__version_ext_names") =
+	"sg_free_table\0"
+	"kfree\0"
 	"vunmap\0"
 	"mutex_init_generic\0"
 	"alloc_chrdev_region\0"
@@ -260,14 +266,14 @@ __used __section("__version_ext_names") =
 	"eventfd_signal_mask\0"
 	"__stack_chk_fail\0"
 	"sysfs_emit\0"
+	"dmi_get_system_info\0"
 	"__num_online_cpus\0"
+	"boot_cpu_data\0"
 	"dma_unmap_sg_attrs\0"
-	"sg_free_table\0"
-	"kfree\0"
 	"module_layout\0"
 ;
 
 MODULE_INFO(depends, "");
 
 
-MODULE_INFO(srcversion, "A6B43E5FE3C8843F1619703");
+MODULE_INFO(srcversion, "DF206547A146A4E1E5506EB");
