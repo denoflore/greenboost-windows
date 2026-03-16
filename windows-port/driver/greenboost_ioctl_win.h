@@ -37,6 +37,7 @@ typedef INT32   gb_s32;
 #define GB_IOCTL_RESET        CTL_CODE(GB_IOCTL_TYPE, 0x803, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define GB_IOCTL_MADVISE      CTL_CODE(GB_IOCTL_TYPE, 0x804, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define GB_IOCTL_EVICT        CTL_CODE(GB_IOCTL_TYPE, 0x805, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define GB_IOCTL_FREE         CTL_CODE(GB_IOCTL_TYPE, 0x806, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define GB_IOCTL_POLL_FD      CTL_CODE(GB_IOCTL_TYPE, 0x807, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define GB_IOCTL_PIN_USER_PTR CTL_CODE(GB_IOCTL_TYPE, 0x808, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
@@ -55,21 +56,30 @@ typedef INT32   gb_s32;
 /* ------------------------------------------------------------------ */
 
 /*
- * GB_IOCTL_ALLOC — Allocate a pinned DDR4 buffer; returns a section
- * handle the shim can MapViewOfFile and then cuMemHostRegister.
+ * GB_IOCTL_ALLOC -- Allocate a pinned DDR4 buffer and map it into the
+ * calling process. Returns a userspace VA the shim passes directly to
+ * cuMemHostRegister. The driver maps the physical pages via
+ * MmMapLockedPagesSpecifyCache into UserMode -- this is the Windows
+ * equivalent of Linux mmap(dma_buf_fd).
  *
- * On Linux, buf_id is derived from the fd via IDR lookup. On Windows,
- * we return it explicitly because the handle alone isn't enough for
- * MADVISE/EVICT operations.
+ * The shim must call GB_IOCTL_FREE with buf_id to release the buffer.
+ * Linux relies on close(fd) triggering DMA-BUF release; Windows has
+ * no equivalent automatic cleanup, so the free is explicit.
  */
 #pragma pack(push, 8)
 struct gb_alloc_req_win {
     gb_u64  size;       /* bytes to allocate               (in)  */
-    HANDLE  handle;     /* section handle returned          (out) */
+    gb_u64  user_va;    /* userspace VA of mapped buffer    (out) */
     gb_s32  buf_id;     /* buffer ID returned               (out) */
     gb_u32  flags;      /* GB_ALLOC_* flags                 (in)  */
 };
 #pragma pack(pop)
+
+/* GB_IOCTL_FREE -- Release a buffer allocated by GB_IOCTL_ALLOC */
+struct gb_free_req_win {
+    gb_s32  buf_id;     /* buffer ID to free                (in)  */
+    gb_u32  _pad;
+};
 
 /* GB_IOCTL_GET_INFO — Pool statistics (three-tier memory hierarchy) */
 #pragma pack(push, 8)
@@ -77,7 +87,7 @@ struct gb_info_win {
     /* Tier 1 — GPU VRAM (physical, managed by NVIDIA driver) */
     gb_u64 vram_physical_mb;
 
-    /* Tier 2 — DDR4 RAM pool (pinned pages, section-exported) */
+    /* Tier 2 -- DDR4 RAM pool (pinned pages, MDL-mapped to userspace) */
     gb_u64 total_ram_mb;
     gb_u64 free_ram_mb;
     gb_u64 allocated_mb;
@@ -126,14 +136,14 @@ struct gb_poll_req_win {
     HANDLE  event_handle;  /* client event handle (in, optional) */
 };
 
-/* GB_IOCTL_PIN_USER_PTR — Pin existing user-space buffer */
+/* GB_IOCTL_PIN_USER_PTR -- Pin existing user-space buffer */
 #pragma pack(push, 8)
 struct gb_pin_req_win {
     gb_u64  vaddr;      /* user-space virtual address       (in)  */
-    gb_u64  size;        /* bytes to pin                     (in)  */
-    HANDLE  handle;     /* section handle returned           (out) */
-    gb_s32  buf_id;     /* buffer ID returned                (out) */
-    gb_u32  flags;      /* GB_ALLOC_* flags                  (in)  */
+    gb_u64  size;       /* bytes to pin                     (in)  */
+    gb_u64  mapped_va;  /* driver-mapped VA returned        (out) */
+    gb_s32  buf_id;     /* buffer ID returned               (out) */
+    gb_u32  flags;      /* GB_ALLOC_* flags                 (in)  */
 };
 #pragma pack(pop)
 

@@ -104,9 +104,8 @@ typedef struct {
     size_t              size;
     int                 is_managed;     /* 1 = UVM fallback               */
     int                 gb_buf_id;      /* buffer ID from driver          */
-    void               *mapped_ptr;     /* MapViewOfFile pointer          */
-    HANDLE              section_handle; /* NT section handle              */
-    uint8_t             _pad[16];       /* pad to 64 bytes                */
+    void               *mapped_ptr;     /* user VA from driver MDL map    */
+    uint8_t             _pad[24];       /* pad to 64 bytes                */
 } __declspec(align(64)) gb_ht_entry_t;
 
 /* ------------------------------------------------------------------ */

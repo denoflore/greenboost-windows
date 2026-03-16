@@ -82,9 +82,9 @@ typedef struct _GB_BUF_WIN {
     LONG                Tier;           /* GB_TIER2_DDR4 or GB_TIER3_NVME */
     ULONG               AllocFlags;     /* GB_ALLOC_* flags               */
 
-    /* Sharing */
-    HANDLE              SectionHandle;  /* shared section for userspace   */
-    PVOID               SectionObject;  /* referenced section object      */
+    /* Sharing -- direct MDL mapping to userspace */
+    PVOID               UserVa;         /* VA in user process address space */
+    PEPROCESS           UserProcess;    /* process that owns the mapping   */
 
     /* LRU tracking */
     LIST_ENTRY          LruNode;        /* link in GB_DEVICE_WIN.LruList  */
@@ -157,6 +157,7 @@ EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL GbEvtIoDeviceControl;
 
 /* IOCTL handlers */
 NTSTATUS GbHandleAlloc(_In_ WDFREQUEST Request);
+NTSTATUS GbHandleFree(_In_ WDFREQUEST Request);
 NTSTATUS GbHandleGetInfo(_In_ WDFREQUEST Request);
 NTSTATUS GbHandleReset(_In_ WDFREQUEST Request);
 NTSTATUS GbHandleMadvise(_In_ WDFREQUEST Request);
@@ -174,9 +175,9 @@ LONG GbRegisterBuf(_In_ PGB_BUF_WIN Buf);
 PGB_BUF_WIN GbLookupBuf(_In_ LONG Id);
 VOID GbUnregisterBuf(_In_ LONG Id);
 
-/* Section sharing */
-NTSTATUS GbCreateSection(_Inout_ PGB_BUF_WIN Buf);
-VOID GbDestroySection(_Inout_ PGB_BUF_WIN Buf);
+/* User mapping -- MDL-based (replaces broken section approach) */
+NTSTATUS GbMapToUser(_Inout_ PGB_BUF_WIN Buf);
+VOID GbUnmapFromUser(_Inout_ PGB_BUF_WIN Buf);
 
 /* Watchdog */
 NTSTATUS GbStartWatchdog(VOID);

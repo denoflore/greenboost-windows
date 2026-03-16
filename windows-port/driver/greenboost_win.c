@@ -13,7 +13,7 @@
  *
  * Port of the Linux greenboost.ko kernel module. Replaces:
  *   - Linux char device → KMDF device with symbolic link
- *   - DMA-BUF export → NT section objects (MapViewOfFile in userspace)
+ *   - DMA-BUF export -> MmMapLockedPagesSpecifyCache to userspace
  *   - alloc_pages(GFP_KERNEL|__GFP_COMP, 9) → MmAllocateContiguousMemorySpecifyCache
  *   - kthread → PsCreateSystemThread
  *   - eventfd → Named kernel event
@@ -197,86 +197,103 @@ VOID GbUnregisterBuf(_In_ LONG Id)
 }
 
 /* ================================================================== */
-/*  Section sharing — create NT section for userspace mapping           */
+/*  User mapping -- map pinned pages directly into caller's process     */
+/*                                                                      */
+/*  This replaces the broken ZwCreateSection approach. ZwCreateSection   */
+/*  with NULL file handle + SEC_COMMIT creates anonymous pagefile-backed */
+/*  memory, NOT a view of our pinned physical pages. That was the       */
+/*  critical bug: the shim would get completely separate memory.        */
+/*                                                                      */
+/*  MmMapLockedPagesSpecifyCache maps the actual physical pages         */
+/*  described by the MDL into the calling process's address space.      */
+/*  This is the exact Windows equivalent of Linux mmap(dma_buf_fd).    */
 /* ================================================================== */
 
-NTSTATUS GbCreateSection(_Inout_ PGB_BUF_WIN Buf)
+NTSTATUS GbMapToUser(_Inout_ PGB_BUF_WIN Buf)
 {
-    NTSTATUS status;
-    OBJECT_ATTRIBUTES oa;
-    LARGE_INTEGER maxSize;
-    HANDLE sectionHandle = NULL;
-    PVOID sectionObject = NULL;
+    PVOID userVa = NULL;
 
-    if (!Buf->KernelVa || Buf->Size == 0)
-        return STATUS_INVALID_PARAMETER;
+    if (!Buf->Mdl) {
+        /*
+         * Contiguous allocations need an MDL built first.
+         * MmBuildMdlForNonPagedPool fills in the PFN array from
+         * the kernel VA, which MmAllocateContiguousMemorySpecifyCache
+         * already has pinned in non-paged pool.
+         */
+        if (Buf->Contiguous && Buf->KernelVa) {
+            Buf->Mdl = IoAllocateMdl(Buf->KernelVa, (ULONG)Buf->Size,
+                                      FALSE, FALSE, NULL);
+            if (!Buf->Mdl)
+                return STATUS_INSUFFICIENT_RESOURCES;
+            MmBuildMdlForNonPagedPool(Buf->Mdl);
+        } else {
+            gb_err("GbMapToUser: no MDL and not contiguous (buf id=%ld)",
+                   Buf->Id);
+            return STATUS_INVALID_PARAMETER;
+        }
+    }
 
     /*
-     * Create a section object backed by the physical pages.
+     * Map the MDL's physical pages into the calling process (UserMode).
+     * MmCached gives best CPU read/write perf for the shim to
+     * cuMemHostRegister the pointer. PCIe snooping handles GPU
+     * cache coherency.
      *
-     * For contiguous memory, we create an MDL describing the physical
-     * region, then create a section from it. For non-contiguous (MDL-based)
-     * allocations, the MDL already exists.
+     * SEH is required because MmMapLockedPagesSpecifyCache can
+     * raise exceptions on failure (e.g. address space exhaustion).
      */
-    if (Buf->Contiguous && !Buf->Mdl) {
-        /* Build MDL for contiguous allocation */
-        Buf->Mdl = IoAllocateMdl(Buf->KernelVa, (ULONG)Buf->Size, FALSE, FALSE, NULL);
-        if (!Buf->Mdl)
-            return STATUS_INSUFFICIENT_RESOURCES;
-        MmBuildMdlForNonPagedPool(Buf->Mdl);
+    __try {
+        userVa = MmMapLockedPagesSpecifyCache(
+            Buf->Mdl,
+            UserMode,
+            MmCached,
+            NULL,           /* let MM pick the VA */
+            FALSE,          /* don't bug-check on failure */
+            NormalPagePriority);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        userVa = NULL;
     }
 
-    /*
-     * Create a section object. We use ZwCreateSection with
-     * SEC_COMMIT to back the section with physical memory.
-     * The section allows userspace to MapViewOfFile the buffer.
-     */
-    maxSize.QuadPart = (LONGLONG)Buf->Size;
-    InitializeObjectAttributes(&oa, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
-
-    status = ZwCreateSection(&sectionHandle,
-                             SECTION_ALL_ACCESS,
-                             &oa,
-                             &maxSize,
-                             PAGE_READWRITE,
-                             SEC_COMMIT,
-                             NULL);
-    if (!NT_SUCCESS(status)) {
-        gb_err("ZwCreateSection failed: 0x%08X", status);
-        return status;
+    if (!userVa) {
+        gb_err("MmMapLockedPagesSpecifyCache failed for buf id=%ld size=%lluMB",
+               Buf->Id, (ULONG64)Buf->Size >> 20);
+        return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    /* Get the section object pointer for kernel reference */
-    status = ObReferenceObjectByHandle(sectionHandle,
-                                       SECTION_ALL_ACCESS,
-                                       NULL,
-                                       KernelMode,
-                                       &sectionObject,
-                                       NULL);
-    if (!NT_SUCCESS(status)) {
-        ZwClose(sectionHandle);
-        gb_err("ObReferenceObjectByHandle failed: 0x%08X", status);
-        return status;
-    }
+    /* Track the mapping for cleanup */
+    Buf->UserVa = userVa;
+    Buf->UserProcess = PsGetCurrentProcess();
+    ObReferenceObject(Buf->UserProcess);
 
-    Buf->SectionHandle = sectionHandle;
-    Buf->SectionObject = sectionObject;
-
-    gb_dbg("section created for buf id=%ld size=%lluMB",
-           Buf->Id, (ULONG64)Buf->Size >> 20);
+    gb_dbg("mapped buf id=%ld (%lluMB) to user VA %p (pid=%lu)",
+           Buf->Id, (ULONG64)Buf->Size >> 20, userVa,
+           (ULONG)(ULONG_PTR)PsGetCurrentProcessId());
 
     return STATUS_SUCCESS;
 }
 
-VOID GbDestroySection(_Inout_ PGB_BUF_WIN Buf)
+VOID GbUnmapFromUser(_Inout_ PGB_BUF_WIN Buf)
 {
-    if (Buf->SectionObject) {
-        ObDereferenceObject(Buf->SectionObject);
-        Buf->SectionObject = NULL;
+    if (Buf->UserVa && Buf->Mdl) {
+        /*
+         * Must unmap in the context of the process that owns the
+         * mapping. If we're in a different context (e.g. driver
+         * unload), attach to the target process first.
+         */
+        if (Buf->UserProcess && Buf->UserProcess != PsGetCurrentProcess()) {
+            KAPC_STATE apcState;
+            KeStackAttachProcess(Buf->UserProcess, &apcState);
+            MmUnmapLockedPages(Buf->UserVa, Buf->Mdl);
+            KeUnstackDetachProcess(&apcState);
+        } else {
+            MmUnmapLockedPages(Buf->UserVa, Buf->Mdl);
+        }
+        Buf->UserVa = NULL;
     }
-    if (Buf->SectionHandle) {
-        ZwClose(Buf->SectionHandle);
-        Buf->SectionHandle = NULL;
+
+    if (Buf->UserProcess) {
+        ObDereferenceObject(Buf->UserProcess);
+        Buf->UserProcess = NULL;
     }
 }
 
@@ -356,7 +373,7 @@ PGB_BUF_WIN GbAllocTier2(_In_ SIZE_T Size, _In_ ULONG Flags)
         buf->PhysAddr = MmGetPhysicalAddress(va);
         buf->Size = Size;
         buf->Contiguous = TRUE;
-        buf->Mdl = NULL;  /* Created lazily in GbCreateSection */
+        buf->Mdl = NULL;  /* Created lazily in GbMapToUser */
 
         gb_dbg("T2 contiguous alloc: %lluMB at phys=0x%llX",
                (ULONG64)Size >> 20, buf->PhysAddr.QuadPart);
@@ -525,8 +542,8 @@ VOID GbFreeBuf(_In_ PGB_BUF_WIN Buf)
     if (Buf->Id > 0)
         GbUnregisterBuf(Buf->Id);
 
-    /* Destroy section */
-    GbDestroySection(Buf);
+    /* Unmap from user process */
+    GbUnmapFromUser(Buf);
 
     /* Update accounting */
     if (Buf->Tier == GB_TIER3_NVME) {
@@ -823,8 +840,8 @@ NTSTATUS GbHandleAlloc(_In_ WDFREQUEST Request)
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    /* Create section for userspace sharing */
-    status = GbCreateSection(buf);
+    /* Map buffer into calling process's address space */
+    status = GbMapToUser(buf);
     if (!NT_SUCCESS(status)) {
         GbFreeBuf(buf);
         return status;
@@ -843,7 +860,7 @@ NTSTATUS GbHandleAlloc(_In_ WDFREQUEST Request)
         }
 
         out->size = buf->Size;
-        out->handle = buf->SectionHandle;
+        out->user_va = (gb_u64)(ULONG_PTR)buf->UserVa;
         out->buf_id = buf->Id;
         out->flags = req->flags;
 
@@ -854,6 +871,42 @@ NTSTATUS GbHandleAlloc(_In_ WDFREQUEST Request)
             (ULONG64)buf->Size >> 20, buf->Id,
             buf->Tier == GB_TIER2_DDR4 ? "T2-DDR4" : "T3-NVMe");
 
+    return STATUS_SUCCESS;
+}
+
+/* ================================================================== */
+/*  GB_IOCTL_FREE -- explicit buffer release                            */
+/*                                                                      */
+/*  Linux relies on close(dma_buf_fd) triggering the DMA-BUF release   */
+/*  callback. Windows has no equivalent automatic cleanup for MDL       */
+/*  mappings, so the shim must explicitly free via this IOCTL.         */
+/* ================================================================== */
+
+NTSTATUS GbHandleFree(_In_ WDFREQUEST Request)
+{
+    NTSTATUS status;
+    struct gb_free_req_win *req;
+    size_t bufLen;
+    PGB_BUF_WIN buf;
+
+    status = WdfRequestRetrieveInputBuffer(Request, sizeof(*req),
+                                           (PVOID*)&req, &bufLen);
+    if (!NT_SUCCESS(status))
+        return status;
+
+    if (bufLen < sizeof(*req))
+        return STATUS_INVALID_PARAMETER;
+
+    buf = GbLookupBuf(req->buf_id);
+    if (!buf) {
+        gb_warn("FREE: buf_id=%d not found", req->buf_id);
+        return STATUS_NOT_FOUND;
+    }
+
+    gb_info("freeing buf id=%ld size=%lluMB (explicit)",
+            buf->Id, (ULONG64)buf->Size >> 20);
+
+    GbFreeBuf(buf);
     return STATUS_SUCCESS;
 }
 
@@ -1111,8 +1164,8 @@ NTSTATUS GbHandlePinUserPtr(_In_ WDFREQUEST Request)
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    /* Create section for sharing */
-    status = GbCreateSection(buf);
+    /* Map into calling process */
+    status = GbMapToUser(buf);
     if (!NT_SUCCESS(status)) {
         GbFreeBuf(buf);
         return status;
@@ -1132,7 +1185,7 @@ NTSTATUS GbHandlePinUserPtr(_In_ WDFREQUEST Request)
 
         out->vaddr = req->vaddr;
         out->size = buf->Size;
-        out->handle = buf->SectionHandle;
+        out->mapped_va = (gb_u64)(ULONG_PTR)buf->UserVa;
         out->buf_id = buf->Id;
         out->flags = req->flags;
 
@@ -1165,6 +1218,9 @@ VOID GbEvtIoDeviceControl(
     switch (IoControlCode) {
     case GB_IOCTL_ALLOC:
         status = GbHandleAlloc(Request);
+        break;
+    case GB_IOCTL_FREE:
+        status = GbHandleFree(Request);
         break;
     case GB_IOCTL_GET_INFO:
         status = GbHandleGetInfo(Request);

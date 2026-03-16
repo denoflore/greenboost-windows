@@ -16,7 +16,7 @@
  * Port of the Linux greenboost_cuda_shim.c. Replaces:
  *   - LD_PRELOAD + dlsym → Detours DetourAttach (or manual IAT patching)
  *   - /dev/greenboost → \\.\GreenBoost via CreateFileW
- *   - DMA-BUF fd + mmap → NT section handle + MapViewOfFile
+ *   - DMA-BUF fd + mmap -> driver MDL map via MmMapLockedPagesSpecifyCache
  *   - eventfd → Named event (GreenBoostPressure)
  *   - pthread_mutex_t → CRITICAL_SECTION
  *   - pthread_cond_t → CONDITION_VARIABLE
@@ -152,7 +152,7 @@ static inline CRITICAL_SECTION *ht_lock_for(uint32_t h)
  * the Linux version (which used memset to zero, breaking chains).
  */
 static int ht_insert(CUdeviceptr ptr, size_t size, int is_managed,
-                     int gb_buf_id, void *mapped_ptr, HANDLE section_handle)
+                     int gb_buf_id, void *mapped_ptr)
 {
     uint32_t h = ht_hash(ptr);
     uint32_t i;
@@ -169,7 +169,6 @@ static int ht_insert(CUdeviceptr ptr, size_t size, int is_managed,
             e->is_managed     = is_managed;
             e->gb_buf_id      = gb_buf_id;
             e->mapped_ptr     = mapped_ptr;
-            e->section_handle = section_handle;
             LeaveCriticalSection(lk);
             return 1;
         }
@@ -183,7 +182,7 @@ static int ht_insert(CUdeviceptr ptr, size_t size, int is_managed,
  * Uses tombstone marker instead of zeroing to preserve probe chains.
  */
 static int ht_remove(CUdeviceptr ptr, size_t *out_size, int *out_managed,
-                     void **out_mapped_ptr, HANDLE *out_section_handle)
+                     void **out_mapped_ptr, int *out_buf_id)
 {
     uint32_t h = ht_hash(ptr);
     uint32_t i;
@@ -196,32 +195,32 @@ static int ht_remove(CUdeviceptr ptr, size_t *out_size, int *out_managed,
         EnterCriticalSection(lk);
 
         if (e->ptr == HT_EMPTY) {
-            /* Empty slot — key not present in table */
+            /* Empty slot -- key not present in table */
             LeaveCriticalSection(lk);
             break;
         }
 
         if (e->ptr == ptr) {
             /* Found it */
-            if (out_size)           *out_size           = e->size;
-            if (out_managed)        *out_managed        = e->is_managed;
-            if (out_mapped_ptr)     *out_mapped_ptr     = e->mapped_ptr;
-            if (out_section_handle) *out_section_handle = e->section_handle;
+            if (out_size)       *out_size       = e->size;
+            if (out_managed)    *out_managed     = e->is_managed;
+            if (out_mapped_ptr) *out_mapped_ptr  = e->mapped_ptr;
+            if (out_buf_id)     *out_buf_id      = e->gb_buf_id;
 
-            /* Mark as tombstone — probing continues past this slot */
+            /* Mark as tombstone -- probing continues past this slot */
             e->ptr            = HT_TOMBSTONE;
             e->size           = 0;
             e->is_managed     = 0;
             e->gb_buf_id      = -1;
             e->mapped_ptr     = NULL;
-            e->section_handle = NULL;
 
             LeaveCriticalSection(lk);
             return 1;
         }
 
         LeaveCriticalSection(lk);
-        /* Tombstone slots don't stop the probe — continue searching */
+
+        /* Tombstone -- keep probing */
     }
     return 0;
 }
@@ -290,10 +289,36 @@ static void gb_close_device(void)
 }
 
 /*
+ * Tell the driver to free a buffer by ID. Used on error cleanup
+ * and on cudaFree. The driver unmaps the user VA and frees pages.
+ */
+static void gb_free_driver_buf(int buf_id)
+{
+    struct gb_free_req_win freq = { 0 };
+    DWORD bytesReturned;
+
+    if (buf_id <= 0)
+        return;
+
+    if (gb_config.DeviceHandle == INVALID_HANDLE_VALUE)
+        return;
+
+    freq.buf_id = buf_id;
+    DeviceIoControl(gb_config.DeviceHandle, GB_IOCTL_FREE,
+                    &freq, sizeof(freq),
+                    NULL, 0,
+                    &bytesReturned, NULL);
+}
+
+/*
  * Allocate memory from the GreenBoost driver and register it with CUDA.
  *
- * Flow: DeviceIoControl(ALLOC) → MapViewOfFile(section) →
- *       cuMemHostRegister(DEVICEMAP) → cuMemHostGetDevicePointer
+ * Flow: DeviceIoControl(ALLOC) -- driver maps pages into our process
+ *       via MmMapLockedPagesSpecifyCache -- returns user_va --
+ *       cuMemHostRegister(DEVICEMAP) -- cuMemHostGetDevicePointer
+ *
+ * The driver does the mapping directly (no MapViewOfFile needed).
+ * This is the Windows equivalent of Linux mmap(dma_buf_fd).
  *
  * On any failure, returns non-zero and the caller falls through to
  * real CUDA allocation.
@@ -326,27 +351,25 @@ static CUresult gb_alloc_from_driver(void **devPtr, size_t size)
         return CUDA_ERROR_NOT_SUPPORTED;
     }
 
-    gb_log("driver allocated %lluMB (id=%d handle=%p)",
-           (unsigned long long)resp.size >> 20, resp.buf_id, resp.handle);
-
-    /* Map the shared section into our address space */
-    mappedPtr = MapViewOfFile(resp.handle,
-                              FILE_MAP_ALL_ACCESS,
-                              0, 0,
-                              (SIZE_T)resp.size);
+    /*
+     * The driver mapped the physical pages directly into our process
+     * via MmMapLockedPagesSpecifyCache(UserMode). The returned user_va
+     * is already valid in our address space -- no MapViewOfFile needed.
+     */
+    mappedPtr = (PVOID)(ULONG_PTR)resp.user_va;
     if (!mappedPtr) {
-        gb_log_err("MapViewOfFile failed (err=%lu)", GetLastError());
-        CloseHandle(resp.handle);
+        gb_log_err("driver returned NULL user_va for %zuMB", size >> 20);
+        gb_free_driver_buf(resp.buf_id);
         return CUDA_ERROR_NOT_SUPPORTED;
     }
 
-    gb_log("mapped %lluMB at %p", (unsigned long long)resp.size >> 20, mappedPtr);
+    gb_log("driver mapped %lluMB at %p (buf_id=%d)",
+           (unsigned long long)resp.size >> 20, mappedPtr, resp.buf_id);
 
     /* Register with CUDA as device-mappable host memory */
     if (!real_cuMemHostRegister) {
-        gb_log_err("cuMemHostRegister not resolved — cannot register host memory");
-        UnmapViewOfFile(mappedPtr);
-        CloseHandle(resp.handle);
+        gb_log_err("cuMemHostRegister not resolved -- cannot register");
+        gb_free_driver_buf(resp.buf_id);
         return CUDA_ERROR_NOT_SUPPORTED;
     }
 
@@ -354,8 +377,7 @@ static CUresult gb_alloc_from_driver(void **devPtr, size_t size)
                                  CU_MEMHOSTREGISTER_DEVICEMAP);
     if (ret != CUDA_SUCCESS) {
         gb_log_err("cuMemHostRegister failed: %d", ret);
-        UnmapViewOfFile(mappedPtr);
-        CloseHandle(resp.handle);
+        gb_free_driver_buf(resp.buf_id);
         return ret;
     }
 
@@ -364,23 +386,21 @@ static CUresult gb_alloc_from_driver(void **devPtr, size_t size)
     if (ret != CUDA_SUCCESS) {
         gb_log_err("cuMemHostGetDevicePointer failed: %d", ret);
         real_cuMemHostUnregister(mappedPtr);
-        UnmapViewOfFile(mappedPtr);
-        CloseHandle(resp.handle);
+        gb_free_driver_buf(resp.buf_id);
         return ret;
     }
 
     *devPtr = (void *)(uintptr_t)dptr;
 
     /* Track in hash table for cleanup on cudaFree */
-    if (!ht_insert(dptr, (size_t)resp.size, 0, resp.buf_id,
-                   mappedPtr, resp.handle)) {
-        gb_log_err("hash table full — leaking allocation");
+    if (!ht_insert(dptr, (size_t)resp.size, 0, resp.buf_id, mappedPtr)) {
+        gb_log_err("hash table full -- leaking allocation");
     }
 
     /* Enqueue prefetch to bring pages into RAM proactively */
     enqueue_prefetch(mappedPtr, (size_t)resp.size);
 
-    gb_log("GreenBoost alloc: %zuMB → device ptr %p (buf_id=%d)",
+    gb_log("GreenBoost alloc: %zuMB -> device ptr %p (buf_id=%d)",
            size >> 20, *devPtr, resp.buf_id);
 
     return CUDA_SUCCESS;
@@ -388,35 +408,28 @@ static CUresult gb_alloc_from_driver(void **devPtr, size_t size)
 
 /*
  * Free a GreenBoost-allocated buffer. Unregisters from CUDA,
- * unmaps the view, and closes the section handle.
+ * then tells the driver to unmap and free the pages.
  */
 static int gb_free_buffer(CUdeviceptr ptr)
 {
     size_t size;
     int is_managed;
     void *mapped_ptr;
-    HANDLE section_handle;
+    int buf_id;
 
-    if (!ht_remove(ptr, &size, &is_managed, &mapped_ptr, &section_handle))
+    if (!ht_remove(ptr, &size, &is_managed, &mapped_ptr, &buf_id))
         return 0;  /* Not our allocation */
 
-    gb_log("freeing GreenBoost buffer: ptr=%p size=%zuMB",
-           (void *)(uintptr_t)ptr, size >> 20);
+    gb_log("freeing GreenBoost buffer: ptr=%p size=%zuMB buf_id=%d",
+           (void *)(uintptr_t)ptr, size >> 20, buf_id);
 
     /* Unregister from CUDA */
     if (mapped_ptr && real_cuMemHostUnregister) {
         real_cuMemHostUnregister(mapped_ptr);
     }
 
-    /* Unmap the view */
-    if (mapped_ptr) {
-        UnmapViewOfFile(mapped_ptr);
-    }
-
-    /* Close the section handle — triggers driver-side buffer free */
-    if (section_handle) {
-        CloseHandle(section_handle);
-    }
+    /* Tell driver to unmap from our process and free the pages */
+    gb_free_driver_buf(buf_id);
 
     return 1;
 }
@@ -966,14 +979,12 @@ static void gb_shim_cleanup(void)
     for (i = 0; i < HT_SIZE; i++) {
         gb_ht_entry_t *e = &gb_htable[i];
         if (e->ptr != HT_EMPTY && e->ptr != HT_TOMBSTONE) {
-            gb_log("cleanup: freeing leaked buffer ptr=%p size=%zu",
-                   (void*)(uintptr_t)e->ptr, e->size);
+            gb_log("cleanup: freeing leaked buffer ptr=%p size=%zu buf_id=%d",
+                   (void*)(uintptr_t)e->ptr, e->size, e->gb_buf_id);
             if (e->mapped_ptr && real_cuMemHostUnregister)
                 real_cuMemHostUnregister(e->mapped_ptr);
-            if (e->mapped_ptr)
-                UnmapViewOfFile(e->mapped_ptr);
-            if (e->section_handle)
-                CloseHandle(e->section_handle);
+            /* Tell driver to unmap and free */
+            gb_free_driver_buf(e->gb_buf_id);
         }
     }
 

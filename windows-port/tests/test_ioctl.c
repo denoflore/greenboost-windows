@@ -124,11 +124,12 @@ static void test_alloc_free(void)
     HANDLE h;
     struct gb_alloc_req_win req = { 0 };
     struct gb_alloc_req_win resp = { 0 };
+    struct gb_free_req_win freq = { 0 };
     DWORD bytesReturned;
     BOOL ok;
     PVOID mapped;
 
-    TEST_START("GB_IOCTL_ALLOC + MapViewOfFile + free");
+    TEST_START("GB_IOCTL_ALLOC + driver MDL map + free");
 
     h = open_device();
     TEST_ASSERT(h != INVALID_HANDLE_VALUE, "device not accessible");
@@ -144,13 +145,12 @@ static void test_alloc_free(void)
 
     TEST_ASSERT(ok, "IOCTL_ALLOC failed (err=%lu)", GetLastError());
     TEST_ASSERT(resp.buf_id > 0, "buf_id should be > 0 (got %d)", resp.buf_id);
-    TEST_ASSERT(resp.handle != NULL, "section handle should not be NULL");
+    TEST_ASSERT(resp.user_va != 0, "user_va should not be NULL");
 
-    printf("(id=%d handle=%p size=%llu) ", resp.buf_id, resp.handle, resp.size);
+    printf("(id=%d va=0x%llx size=%llu) ", resp.buf_id, resp.user_va, resp.size);
 
-    /* Map into our address space */
-    mapped = MapViewOfFile(resp.handle, FILE_MAP_ALL_ACCESS, 0, 0, (SIZE_T)resp.size);
-    TEST_ASSERT(mapped != NULL, "MapViewOfFile failed (err=%lu)", GetLastError());
+    /* The driver already mapped the pages into our process */
+    mapped = (PVOID)(ULONG_PTR)resp.user_va;
 
     /* Write a pattern to verify the memory works */
     memset(mapped, 0xAB, (SIZE_T)resp.size);
@@ -162,9 +162,12 @@ static void test_alloc_free(void)
                     "memory verification failed");
     }
 
-    /* Unmap and close */
-    UnmapViewOfFile(mapped);
-    CloseHandle(resp.handle);
+    /* Free via explicit IOCTL (driver unmaps + frees pages) */
+    freq.buf_id = resp.buf_id;
+    DeviceIoControl(h, GB_IOCTL_FREE,
+                    &freq, sizeof(freq),
+                    NULL, 0,
+                    &bytesReturned, NULL);
     CloseHandle(h);
 
     TEST_PASS();
@@ -201,10 +204,14 @@ static void test_alloc_multiple(void)
     for (i = 0; i < 8; i++) printf("%d ", resps[i].buf_id);
     printf(") ");
 
-    /* Free all */
+    /* Free all via explicit IOCTL */
     for (i = 0; i < 8; i++) {
-        if (resps[i].handle)
-            CloseHandle(resps[i].handle);
+        struct gb_free_req_win freq = { 0 };
+        freq.buf_id = resps[i].buf_id;
+        DeviceIoControl(h, GB_IOCTL_FREE,
+                        &freq, sizeof(freq),
+                        NULL, 0,
+                        &bytesReturned, NULL);
     }
 
     CloseHandle(h);
@@ -257,7 +264,13 @@ static void test_madvise(void)
     TEST_ASSERT(ok, "MADVISE FREEZE failed (err=%lu)", GetLastError());
 
     /* Cleanup */
-    if (alloc_resp.handle) CloseHandle(alloc_resp.handle);
+    {
+        struct gb_free_req_win freq = { 0 };
+        freq.buf_id = alloc_resp.buf_id;
+        DeviceIoControl(h, GB_IOCTL_FREE,
+                        &freq, sizeof(freq),
+                        NULL, 0, &bytesReturned, NULL);
+    }
     CloseHandle(h);
     TEST_PASS();
 }
@@ -293,7 +306,13 @@ static void test_evict(void)
     TEST_ASSERT(ok, "EVICT failed (err=%lu)", GetLastError());
 
     /* Cleanup */
-    if (alloc_resp.handle) CloseHandle(alloc_resp.handle);
+    {
+        struct gb_free_req_win freq = { 0 };
+        freq.buf_id = alloc_resp.buf_id;
+        DeviceIoControl(h, GB_IOCTL_FREE,
+                        &freq, sizeof(freq),
+                        NULL, 0, &bytesReturned, NULL);
+    }
     CloseHandle(h);
     TEST_PASS();
 }
@@ -326,8 +345,13 @@ static void test_stress_alloc_free(void)
             continue;
         }
 
-        if (resp.handle)
-            CloseHandle(resp.handle);
+        if (resp.buf_id > 0) {
+            struct gb_free_req_win freq = { 0 };
+            freq.buf_id = resp.buf_id;
+            DeviceIoControl(h, GB_IOCTL_FREE,
+                            &freq, sizeof(freq),
+                            NULL, 0, &bytesReturned, NULL);
+        }
     }
 
     CloseHandle(h);
