@@ -80,6 +80,7 @@ If Detours is not in your system path:
 .\vcpkg install detours:x64-windows
 
 # Point CMake to Detours
+# replace "path/to/detours" to "<vcpkg root>/packages/detours_x64-windows"
 cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="path/to/detours"
 ```
 
