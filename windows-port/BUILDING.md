@@ -71,10 +71,13 @@ cd tools
 If Detours is not in your system path:
 
 ```powershell
-# Install via NuGet
-nuget install Microsoft.Detours
-# Or via vcpkg
-vcpkg install detours:x64-windows
+# install vcpkg
+# git clone https://github.com/Microsoft/vcpkg.git
+# cd vcpkg
+# bootstrap-vcpkg.bat
+# .\vcpkg integrate install
+# Install via vcpkg
+.\vcpkg install detours:x64-windows
 
 # Point CMake to Detours
 cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="path/to/detours"
