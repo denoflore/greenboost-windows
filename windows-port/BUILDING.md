@@ -18,6 +18,7 @@
 cd windows-port
 
 # Configure (Release, x64)
+# If you want to user detours, see "Detours Setup" below
 cmake -B build -G "Visual Studio 17 2022" -A x64
 
 # Build
@@ -76,12 +77,14 @@ If Detours is not in your system path:
 # cd vcpkg
 # bootstrap-vcpkg.bat
 # .\vcpkg integrate install
-# Install via vcpkg
-.\vcpkg install detours:x64-windows
+# add vcpkg to PATH
+# add vcpkg to VCPKG_ROOT
 
-# Point CMake to Detours
-# replace "path/to/detours" to "<vcpkg root>/packages/detours_x64-windows"
-cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="path/to/detours"
+# Install via vcpkg
+vcpkg install detours:x64-windows
+
+# Point CMake to Detours($env:VCPKG_ROOT is the vcpkg directory)
+cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 ```
 
 If Detours is not available, the shim falls back to IAT patching (limited hook coverage).
