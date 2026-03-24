@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only
+﻿/* SPDX-License-Identifier: GPL-2.0-only
  * Copyright (C) 2024-2026 Ferran Duarri. Dual-licensed: GPL v2 + Commercial.
  * GreenBoost v2.3 — Windows IOCTL definitions (kernel + userspace)
  *

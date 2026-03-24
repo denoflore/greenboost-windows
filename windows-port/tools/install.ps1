@@ -27,9 +27,36 @@ $ShimDll = "greenboost_cuda.dll"
 $DriverSys = "greenboost_win.sys"
 $DriverInf = "greenboost_win.inf"
 $TestExe = "test_ioctl.exe"
+$DeviceHardwareId = "Root\GreenBoost"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outputsDir = Join-Path $scriptDir "outputs"
+
+function Find-DevCon {
+    $devconPaths = @(
+        (Join-Path $outputsDir "devcon.exe"),
+        "C:\Program Files (x86)\Windows Kits\10\Tools\10.0.26100.0\x64\devcon.exe",
+        "C:\Program Files (x86)\Windows Kits\10\Tools\10.0.22621.0\x64\devcon.exe",
+        "C:\Program Files (x86)\Windows Kits\10\Tools\10.0.22000.0\x64\devcon.exe",
+        "C:\Program Files (x86)\Windows Kits\10\Tools\x64\devcon.exe"
+    )
+    foreach ($path in $devconPaths) {
+        if (Test-Path $path) {
+            return $path
+        }
+    }
+    $kitsRoot = "C:\Program Files (x86)\Windows Kits\10\Tools"
+    if (Test-Path $kitsRoot) {
+        $found = Get-ChildItem $kitsRoot -Recurse -Filter "devcon.exe" -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match "\\x64\\" } |
+                 Sort-Object { $_.Directory.Name } -Descending |
+                 Select-Object -First 1
+        if ($found) {
+            return $found.FullName
+        }
+    }
+    return $null
+}
 
 function Write-Status($msg) { Write-Host "[GreenBoost] $msg" -ForegroundColor Green }
 function Write-Warn($msg)   { Write-Host "[GreenBoost] WARNING: $msg" -ForegroundColor Yellow }
@@ -151,46 +178,161 @@ function Install-GreenBoostDriver {
         }
     }
 
-    Write-Status "Installing driver..."
+    $existingDevice = & pnputil /enum-devices /connected 2>$null | Select-String -Pattern "GreenBoost"
+    if ($existingDevice) {
+        Write-Status "Device already exists, checking service..."
+        $svc = Get-Service -Name $DriverName -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq "Running") {
+            Write-Status "Driver already installed and running"
+            return $true
+        }
+        if ($svc) {
+            Start-Service -Name $DriverName -ErrorAction SilentlyContinue
+            Write-Status "Driver service started"
+            return $true
+        }
+    }
+
+    $devcon = Find-DevCon
+    if (-not $devcon) {
+        Write-Warn "devcon.exe not found. Falling back to pnputil (device may not be created properly)."
+        Write-Warn "For proper installation, install Windows SDK or place devcon.exe in outputs folder."
+        Write-Status "Installing driver package with pnputil..."
+        try {
+            $result = & pnputil /add-driver $infPath /install 2>&1
+            Write-Status "pnputil output: $result"
+        } catch {
+            Write-Err "Driver installation failed: $_"
+            return $false
+        }
+        try {
+            Start-Service -Name $DriverName -ErrorAction SilentlyContinue
+            Write-Status "Driver service started"
+        } catch {
+            Write-Warn "Could not start driver service (may need reboot)"
+        }
+        return $true
+    }
+
+    Write-Status "Found devcon at: $devcon"
+    Write-Status "Installing driver with devcon (creates device instance)..."
+
+    Push-Location $outputsDir
     try {
-        $result = & pnputil /add-driver $infPath /install 2>&1
-        Write-Status "pnputil output: $result"
+        $result = & $devcon install $DriverInf $DeviceHardwareId 2>&1
+        Write-Status "devcon output: $result"
+        
+        if ($LASTEXITCODE -ne 0 -and $result -notmatch "device.*created.*successfully") {
+            if ($result -match "already exists") {
+                Write-Status "Device already exists, attempting to restart..."
+                & $devcon restart $DeviceHardwareId 2>&1 | Out-Null
+            } else {
+                Write-Warn "devcon install returned non-zero, checking if device exists..."
+            }
+        }
     } catch {
         Write-Err "Driver installation failed: $_"
+        Pop-Location
         return $false
     }
+    Pop-Location
 
-    try {
-        Start-Service -Name $DriverName -ErrorAction SilentlyContinue
-        Write-Status "Driver service started"
-    } catch {
-        Write-Warn "Could not start driver service (may need reboot)"
+    Start-Sleep -Milliseconds 500
+
+    $svc = Get-Service -Name $DriverName -ErrorAction SilentlyContinue
+    if ($svc) {
+        if ($svc.Status -ne "Running") {
+            Start-Service -Name $DriverName -ErrorAction SilentlyContinue
+        }
+        Write-Status "Driver service status: $($svc.Status)"
     }
 
-    return $true
+    Write-Status "Verifying device accessibility..."
+    try {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class GbDevCheck {
+    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+    static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess,
+        uint dwShareMode, IntPtr lpSecurityAttributes, uint dwCreationDisposition,
+        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr hObject);
+    public static bool TestOpen() {
+        IntPtr h = CreateFile("\\\\.\\GreenBoost", 0xC0000000, 0, IntPtr.Zero, 3, 0x80, IntPtr.Zero);
+        if (h != (IntPtr)(-1)) { CloseHandle(h); return true; }
+        return false;
+    }
+}
+"@ -Language CSharp -ErrorAction SilentlyContinue
+        $deviceAccessible = [GbDevCheck]::TestOpen()
+        if ($deviceAccessible) {
+            Write-Status "Device \\.\GreenBoost is accessible!"
+            return $true
+        } else {
+            Write-Warn "Device \\.\GreenBoost not accessible yet (may need reboot)"
+            return $true
+        }
+    } catch {
+        Write-Warn "Could not verify device accessibility"
+        return $true
+    }
 }
 
 function Uninstall-GreenBoostDriver {
     Write-Status "Stopping driver service..."
     Stop-Service -Name $DriverName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
 
-    Write-Status "Removing driver..."
-    try {
-        $result = & pnputil /delete-driver oem0.inf /uninstall /force 2>&1
-        Write-Status "pnputil output: $result"
-    } catch {
-        Write-Warn "Driver removal may require manual cleanup"
+    $devcon = Find-DevCon
+    
+    if ($devcon) {
+        Write-Status "Removing device with devcon..."
+        Push-Location $outputsDir
+        try {
+            & $devcon remove $DeviceHardwareId 2>&1 | ForEach-Object { Write-Status "devcon: $_" }
+        } catch {
+            Write-Warn "devcon remove failed: $_"
+        }
+        Pop-Location
+        Start-Sleep -Milliseconds 500
+    } else {
+        Write-Warn "devcon not found, using sc to delete service..."
     }
 
-    $infPath = Join-Path $outputsDir $DriverInf
-    if (Test-Path $infPath) {
-        try {
-            $result = & pnputil /delete-driver $DriverInf /uninstall /force 2>&1
-            Write-Status "pnputil output: $result"
-        } catch {
-            Write-Warn "Driver removal may require manual cleanup"
+    Write-Status "Deleting service..."
+    & sc.exe delete $DriverName 2>&1 | Out-Null
+
+    Write-Status "Finding and removing driver packages..."
+    $driverPackages = pnputil /enum-drivers 2>$null | Select-String -Pattern "greenboost_win.inf" -Context 5,0
+    $oemInfs = @()
+    foreach ($match in $driverPackages) {
+        if ($match -match "(?:发布名称|Published Name)\s*:\s*(oem\d+\.inf)") {
+            $oemInfs += $Matches[1]
         }
     }
+
+    if ($oemInfs.Count -eq 0) {
+        Write-Status "No driver packages found to remove"
+    } else {
+        Write-Status "Found $($oemInfs.Count) driver package(s) to remove"
+        foreach ($oemInf in $oemInfs) {
+            Write-Status "Removing driver package: $oemInf"
+            try {
+                $result = & pnputil /delete-driver $oemInf /uninstall /force 2>&1
+                if ($result -match "deleted successfully|Driver package") {
+                    Write-Status "Successfully removed: $oemInf"
+                } else {
+                    Write-Warn "Result for $oemInf : $result"
+                }
+            } catch {
+                Write-Warn "Failed to remove $oemInf : $_"
+            }
+        }
+    }
+
+    Write-Status "Driver uninstallation complete"
 }
 
 function Install-GreenBoostShim {

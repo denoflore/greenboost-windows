@@ -59,7 +59,8 @@ try {
         "-G", "Visual Studio 17 2022",
         "-A", $Arch,
         "-DCMAKE_BUILD_TYPE=$Config",
-        "-DGB_BUILD_DRIVER=ON"
+        # "-DGB_BUILD_DRIVER=ON",  // use VS 2022 KMDF driver Project to build, CMake cannot build the driver correctly(will cause BSOD)
+        "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
     )
     Write-Host "Running: cmake $configureArgs" -ForegroundColor Gray
     & cmake $configureArgs
@@ -96,31 +97,122 @@ try {
         Write-Host "  [EXE]  $testPath" -ForegroundColor Green
     }
 
-    if (-not $NoSign) {
-        Write-Step "[4/5] Sign Driver"
-        $signScript = Join-Path $scriptDir "sign.ps1"
-        if (Test-Path $signScript) {
-            Write-Host "Running sign.ps1..." -ForegroundColor Gray
-            & $signScript
-            if ($LASTEXITCODE -ne 0) {
-                throw "Signing failed with exit code: $LASTEXITCODE"
-            }
-            Write-Host "Driver signed successfully." -ForegroundColor Green
-        } else {
-            Write-Host "[WARNING] sign.ps1 not found, skipping signing." -ForegroundColor Yellow
-        }
-    } else {
-        Write-Step "[4/5] Sign Driver (Skipped)"
-        Write-Host "Signing skipped due to -NoSign flag." -ForegroundColor Yellow
-    }
+    # if (-not $NoSign) {
+    #     Write-Step "[4/6] Sign Driver"
+    #     $signScript = Join-Path $scriptDir "sign.ps1"
+    #     if (Test-Path $signScript) {
+    #         Write-Host "Running sign.ps1..." -ForegroundColor Gray
+    #         & $signScript
+    #         if ($LASTEXITCODE -ne 0) {
+    #             throw "Signing failed with exit code: $LASTEXITCODE"
+    #         }
+    #         Write-Host "Driver signed successfully." -ForegroundColor Green
+    #     } else {
+    #         Write-Host "[WARNING] sign.ps1 not found, skipping signing." -ForegroundColor Yellow
+    #     }
+    # } else {
+    #     Write-Step "[4/6] Sign Driver (Skipped)"
+    #     Write-Host "Signing skipped due to -NoSign flag." -ForegroundColor Yellow
+    # }
 
-    Write-Step "[5/5] Collect Outputs"
+    # Write-Step "[5/6] Create Catalog File"
+    # $inf2catPaths = @(
+    #     "${env:WindowsSdkDir}bin\10.0.26100.0\x86\inf2cat.exe",
+    #     "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x86\inf2cat.exe"
+    # )
+    
+    # $sdkDir = "${env:WindowsSdkDir}"
+    # if ($sdkDir) {
+    #     $versions = Get-ChildItem -Path "$sdkDir\bin" -Directory | Where-Object { $_.Name -match "^10\." } | Sort-Object Name -Descending
+    #     if ($versions) {
+    #         $latestVersion = $versions[0].Name
+    #         $inf2catPath = Join-Path "$sdkDir\bin\$latestVersion\x86" "inf2cat.exe"
+    #         if (Test-Path $inf2catPath) {
+    #             $inf2catPaths = @($inf2catPath) + $inf2catPaths
+    #         }
+    #     }
+    # }
+    
+    # $inf2catExe = $null
+    # foreach ($path in $inf2catPaths) {
+    #     if (Test-Path $path) {
+    #         $inf2catExe = $path
+    #         break
+    #     }
+    # }
+    
+    # if ($inf2catExe) {
+    #     Write-Host "Found inf2cat: $inf2catExe" -ForegroundColor Gray
+        
+    #     $driverOutputDir = Join-Path $buildDir "driver\$Config"
+        
+    #     $infSource = Join-Path $scriptDir "driver\greenboost_win.inf"
+    #     if (Test-Path $infSource) {
+    #         Copy-Item -Path $infSource -Destination $driverOutputDir -Force
+    #         Write-Host "Copied INF to driver output directory" -ForegroundColor Gray
+    #     }
+        
+    #     Write-Host "Running: inf2cat /drv:$driverOutputDir /os:10_X64,Server10_X64" -ForegroundColor Gray
+    #     $inf2catOutput = & $inf2catExe /drv:$driverOutputDir /os:10_X64,Server10_X64 2>&1
+    #     Write-Host $inf2catOutput -ForegroundColor Gray
+        
+    #     $catPath = Join-Path $driverOutputDir "greenboost_win.cat"
+    #     if (Test-Path $catPath) {
+    #         Write-Host "Catalog file created: greenboost_win.cat" -ForegroundColor Green
+            
+    #         if (-not $NoSign) {
+    #             Write-Host "Signing catalog file..." -ForegroundColor Gray
+    #             $signtoolPaths = @(
+    #                 "${env:WindowsSdkDir}bin\10.0.26100.0\x64\signtool.exe",
+    #                 "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
+    #             )
+                
+    #             $sdkDir2 = "${env:WindowsSdkDir}"
+    #             if ($sdkDir2) {
+    #                 $versions2 = Get-ChildItem -Path "$sdkDir2\bin" -Directory | Where-Object { $_.Name -match "^10\." } | Sort-Object Name -Descending
+    #                 if ($versions2) {
+    #                     $latestVersion2 = $versions2[0].Name
+    #                     $signtoolPath2 = Join-Path "$sdkDir2\bin\$latestVersion2\x64" "signtool.exe"
+    #                     if (Test-Path $signtoolPath2) {
+    #                         $signtoolPaths = @($signtoolPath2) + $signtoolPaths
+    #                     }
+    #                 }
+    #             }
+                
+    #             $signtoolExe = $null
+    #             foreach ($path in $signtoolPaths) {
+    #                 if (Test-Path $path) {
+    #                     $signtoolExe = $path
+    #                     break
+    #                 }
+    #             }
+                
+    #             if ($signtoolExe) {
+    #                 Write-Host "Signing catalog..." -ForegroundColor Gray
+    #                 & $signtoolExe sign /s PrivateCertStore /n GreenBoostTestCert /fd sha256 $catPath
+    #                 if ($?) {
+    #                     Write-Host "Catalog file signed." -ForegroundColor Green
+    #                 } else {
+    #                     Write-Host "[WARNING] Catalog signing failed (non-fatal)" -ForegroundColor Yellow
+    #                 }
+    #             }
+    #         }
+    #     } else {
+    #         Write-Host "[WARNING] inf2cat did not create .cat file" -ForegroundColor Yellow
+    #         Write-Host "  Check INF file syntax and ensure it references the correct .sys file" -ForegroundColor Gray
+    #     }
+    # } else {
+    #     Write-Host "[WARNING] inf2cat.exe not found, skipping catalog creation" -ForegroundColor Yellow
+    #     Write-Host "  Install Windows SDK to enable catalog file generation" -ForegroundColor Gray
+    # }
+
+    Write-Step "[6/6] Collect Outputs"
     Write-Host "Collecting build artifacts to tools\outputs..." -ForegroundColor Gray
 
-    if (Test-Path $outputsDir) {
-        Remove-Item -Path $outputsDir -Recurse -Force
-    }
-    New-Item -Path $outputsDir -ItemType Directory -Force | Out-Null
+    # if (Test-Path $outputsDir) {
+    #     Remove-Item -Path $outputsDir -Recurse -Force
+    # }
+    # New-Item -Path $outputsDir -ItemType Directory -Force | Out-Null
 
     $collected = @()
 
@@ -130,18 +222,25 @@ try {
         Write-Host "  Copied: greenboost_cuda.dll" -ForegroundColor Green
     }
 
-    if (Test-Path $driverPath) {
-        Copy-Item -Path $driverPath -Destination $outputsDir -Force
-        $collected += "greenboost_win.sys"
-        Write-Host "  Copied: greenboost_win.sys" -ForegroundColor Green
-    }
+    # if (Test-Path $driverPath) {
+    #     Copy-Item -Path $driverPath -Destination $outputsDir -Force
+    #     $collected += "greenboost_win.sys"
+    #     Write-Host "  Copied: greenboost_win.sys" -ForegroundColor Green
+    # }
 
-    $infSource = Join-Path $scriptDir "driver\greenboost_win.inf"
-    if (Test-Path $infSource) {
-        Copy-Item -Path $infSource -Destination $outputsDir -Force
-        $collected += "greenboost_win.inf"
-        Write-Host "  Copied: greenboost_win.inf" -ForegroundColor Green
-    }
+    # $infSource = Join-Path $scriptDir "driver\greenboost_win.inf"
+    # if (Test-Path $infSource) {
+    #     Copy-Item -Path $infSource -Destination $outputsDir -Force
+    #     $collected += "greenboost_win.inf"
+    #     Write-Host "  Copied: greenboost_win.inf" -ForegroundColor Green
+    # }
+
+    # $catSource = Join-Path $buildDir "driver\$Config\greenboost_win.cat"
+    # if (Test-Path $catSource) {
+    #     Copy-Item -Path $catSource -Destination $outputsDir -Force
+    #     $collected += "greenboost_win.cat"
+    #     Write-Host "  Copied: greenboost_win.cat" -ForegroundColor Green
+    # }
 
     if (Test-Path $testPath) {
         Copy-Item -Path $testPath -Destination $outputsDir -Force

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only
+﻿/* SPDX-License-Identifier: GPL-2.0-only
  * Copyright (C) 2024-2026 Ferran Duarri. Dual-licensed: GPL v2 + Commercial.
  *
  * GreenBoost v2.3 — Windows KMDF Driver
@@ -756,7 +756,7 @@ static NTSTATUS GbCreatePressureEvent(VOID)
 
     RtlInitUnicodeString(&eventName, GB_PRESSURE_EVENT);
     InitializeObjectAttributes(&oa, &eventName,
-                               OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE,
+                               OBJ_CASE_INSENSITIVE,
                                NULL, NULL);
 
     status = ZwCreateEvent(&eventHandle, EVENT_ALL_ACCESS, &oa,

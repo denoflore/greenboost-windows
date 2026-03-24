@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only
+﻿/* SPDX-License-Identifier: GPL-2.0-only
  * Copyright (C) 2024-2026 Ferran Duarri. Dual-licensed: GPL v2 + Commercial.
  * GreenBoost v2.3 — Windows KMDF driver internal header
  *
@@ -11,7 +11,7 @@
 #ifndef GREENBOOST_WIN_H
 #define GREENBOOST_WIN_H
 
-#include <ntddk.h>
+#include <ntifs.h>
 #include <wdf.h>
 #include <wdmsec.h>
 #include "greenboost_ioctl_win.h"
@@ -24,14 +24,6 @@
 /*  The layouts below are based on reverse engineering and are stable   */
 /*  across Windows versions. Use at your own risk.                      */
 /* ------------------------------------------------------------------ */
-typedef struct _KAPC_STATE {
-    LIST_ENTRY ApcListHead;
-    struct _KPROCESS *Process;
-    UCHAR InProgressFlags;
-    UCHAR KernelApcPending;
-    UCHAR UserApcPending;
-} KAPC_STATE, *PKAPC_STATE;
-
 
 typedef enum _SYSTEM_INFORMATION_CLASS {
     SystemBasicInformation = 0,
