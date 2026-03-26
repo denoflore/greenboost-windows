@@ -32,23 +32,44 @@ This is my first actually useful open source contribution. I've got research rep
 
 Everything from Ferran's original repo (untouched, his README preserved as `README_original_ferran.md`) plus a complete `windows-port/` directory:
 
-| Component | File | Lines | What it does |
-|-----------|------|-------|-------------|
-| KMDF Driver | `driver/greenboost_win.c` | ~1,430 | Windows kernel driver replacing `greenboost.ko`. Allocates pinned 2MB contiguous memory blocks, maps them directly into userspace via MDL, monitors memory pressure, manages buffer lifecycle. |
-| Driver Header | `driver/greenboost_win.h` | ~300 | Per-buffer and global device state structs, system information types for memory queries. |
-| IOCTL Header | `driver/greenboost_ioctl_win.h` | 165 | Windows IOCTL definitions using CTL_CODE. Shared between driver and shim. |
-| CUDA Shim | `shim/greenboost_cuda_shim_win.c` | ~1,270 | DLL that hooks cudaMalloc/cudaFree via Microsoft Detours. Routes large allocations through CUDA UVM (primary) or driver-mapped pages (fallback), spoofs VRAM reporting so inference engines see extended memory. |
-| Shim Header | `shim/greenboost_cuda_shim_win.h` | ~175 | Hash table, config struct, CUDA type definitions, UVM prefetch typedefs. |
-| Driver INF | `driver/greenboost_win.inf` | 84 | Standard KMDF driver installation manifest. |
-| Installer | `tools/install.ps1` | ~530 | PowerShell script that detects hardware, computes optimal config, writes registry keys, installs the driver. |
-| Build Script | `tools/build.ps1` | 271 | Automated build for driver + shim. |
-| Sign Script | `tools/sign.ps1` | 159 | Test-signing automation. |
-| Config | `tools/config.ps1` | 184 | Registry configuration utility. |
-| Diagnostics | `tools/diagnose.ps1` | 241 | Health check script. |
-| IOCTL Tests | `tests/test_ioctl.c` | 442 | Smoke tests and stress tests for the driver interface. |
-| UVM Tests | `tests/test_uvm.c` | 91 | UVM allocation path validation (6 tests). |
-| Build System | `CMakeLists.txt` (x3) | ~200 | CMake configs for driver, shim, and tests with auto WDK/KMDF detection. |
-| Docs | `BUILDING.md`, `TROUBLESHOOTING.md` | ~815 | Build from source instructions and common fixes. |
+**Driver** (~1,900 lines)
+
+`driver/greenboost_win.c` -- KMDF kernel driver. Allocates pinned 2MB contiguous blocks, maps into userspace via MDL, monitors RAM/pagefile pressure, manages LRU buffer lifecycle with three-tier eviction.
+
+`driver/greenboost_win.h` -- Device state structs, system information types for memory queries.
+
+`driver/greenboost_ioctl_win.h` -- Windows IOCTL definitions (CTL_CODE). Shared between driver and shim.
+
+`driver/greenboost_win.inf` -- KMDF driver installation manifest.
+
+**CUDA Shim** (~1,450 lines)
+
+`shim/greenboost_cuda_shim_win.c` -- DLL that hooks cudaMalloc/cudaFree via Microsoft Detours. Routes large allocations through CUDA UVM (primary) or driver-mapped pinned pages (fallback). Spoofs VRAM reporting so inference engines see extended memory.
+
+`shim/greenboost_cuda_shim_win.h` -- Fibonacci hash table, config struct, CUDA type stubs, UVM prefetch typedefs.
+
+**Tests** (~530 lines)
+
+`tests/test_ioctl.c` -- 7-test driver interface validation (alloc, free, info, madvise, evict, pin, pressure event).
+
+`tests/test_uvm.c` -- 6-test UVM allocation path validation (interception, memset, free, multi-alloc, VRAM spoofing).
+
+**Tools** (~1,150 lines)
+
+`tools/build.ps1` -- Automated VS2022 + WDK + vcpkg build.
+`tools/install.ps1` -- Hardware detection, registry config, driver install.
+`tools/sign.ps1` -- Test-signing automation.
+`tools/config.ps1` -- Registry configuration utility.
+`tools/diagnose.ps1` -- Health check script.
+
+**Build System** (~200 lines)
+
+Three `CMakeLists.txt` files with auto WDK/KMDF version detection, vcpkg Detours discovery, and conditional driver/shim/test targets.
+
+**Docs** (~815 lines)
+
+`BUILDING.md` -- Full build instructions for VS2022 + WDK + vcpkg.
+`TROUBLESHOOTING.md` -- Common build and runtime issues.
 
 ---
 
@@ -132,3 +153,4 @@ Original work: Copyright (C) 2024-2026 Ferran Duarri
 Windows port: Copyright (C) 2026 Chris Zuger
 SPDX-License-Identifier: GPL-2.0-only
 ```
+
