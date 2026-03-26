@@ -38,6 +38,9 @@
 /*  Globals                                                             */
 /* ================================================================== */
 
+/* DeviceHandle must be INVALID_HANDLE_VALUE before gb_read_config.
+ * Zero-init sets it to 0 (a valid handle on Windows = stdin).
+ * gb_read_config() corrects it, but guard against any use in between. */
 gb_shim_config_t  gb_config = { 0 };
 gb_ht_entry_t     gb_htable[HT_SIZE];
 CRITICAL_SECTION  ht_locks[HT_LOCKS];
@@ -631,6 +634,28 @@ static cudaError_t CUDAAPI hooked_cudaMallocAsync(
     return real_cudaMallocAsync(devPtr, size, stream);
 }
 
+static cudaError_t CUDAAPI hooked_cudaMallocManaged(
+    void **devPtr, size_t size, unsigned int flags)
+{
+    if (!gb_config.UvmProbed)
+        gb_probe_uvm_once();
+
+    /* Intercept large managed allocations the same way as cudaMalloc */
+    if (size >= gb_config.ThresholdBytes && gb_config.Initialized) {
+        if (gb_config.UvmAvailable) {
+            CUresult ret = gb_alloc_uvm(devPtr, size);
+            if (ret == CUDA_SUCCESS)
+                return (cudaError_t)CUDA_SUCCESS;
+        }
+        {
+            CUresult ret = gb_alloc_from_driver(devPtr, size);
+            if (ret == CUDA_SUCCESS)
+                return (cudaError_t)CUDA_SUCCESS;
+        }
+    }
+    return real_cudaMallocManaged(devPtr, size, flags);
+}
+
 static CUresult CUDAAPI hooked_cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
 {
     if (!gb_config.UvmProbed)
@@ -719,8 +744,11 @@ static cudaError_t CUDAAPI hooked_cudaMemGetInfo(size_t *free, size_t *total)
         size_t orig_total = *total;
         size_t orig_free = *free;
         *total = gb_config.ReportedTotalVram;
-        /* Add the DDR4 pool available to free */
-        *free = orig_free + (gb_config.ReportedTotalVram - orig_total);
+        /* Add the DDR4 pool available to free, guard against underflow
+         * when GPU has more VRAM than our config expects */
+        if (gb_config.ReportedTotalVram > orig_total)
+            *free = orig_free + (gb_config.ReportedTotalVram - orig_total);
+        /* else: leave *free as-is (real GPU has more than configured) */
         gb_log("cudaMemGetInfo: total %zuMB→%zuMB free %zuMB→%zuMB",
                orig_total >> 20, *total >> 20,
                orig_free >> 20, *free >> 20);
@@ -735,7 +763,8 @@ static CUresult CUDAAPI hooked_cuMemGetInfo(size_t *free, size_t *total)
         size_t orig_total = *total;
         size_t orig_free = *free;
         *total = gb_config.ReportedTotalVram;
-        *free = orig_free + (gb_config.ReportedTotalVram - orig_total);
+        if (gb_config.ReportedTotalVram > orig_total)
+            *free = orig_free + (gb_config.ReportedTotalVram - orig_total);
         gb_log("cuMemGetInfo: total %zuMB→%zuMB free %zuMB→%zuMB",
                orig_total >> 20, *total >> 20,
                orig_free >> 20, *free >> 20);
@@ -801,9 +830,16 @@ static void gb_read_config(void)
         }
     }
 
-    /* Read from registry */
-    result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\GreenBoost",
+    /* Read from registry — try the driver's service key first (canonical
+     * path written by install.ps1 and config.ps1), fall back to the
+     * SOFTWARE hive for backwards compatibility. */
+    result = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+                           "SYSTEM\\CurrentControlSet\\Services\\GreenBoost\\Parameters",
                            0, KEY_READ, &hKey);
+    if (result != ERROR_SUCCESS) {
+        result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\GreenBoost",
+                               0, KEY_READ, &hKey);
+    }
     if (result != ERROR_SUCCESS)
         goto done;
 
@@ -955,6 +991,8 @@ static void gb_install_hooks(void)
         DetourAttach((PVOID*)&real_cuMemAllocAsync, hooked_cuMemAllocAsync);
     if (real_cuMemFreeAsync)
         DetourAttach((PVOID*)&real_cuMemFreeAsync, hooked_cuMemFreeAsync);
+    if (real_cudaMallocManaged)
+        DetourAttach((PVOID*)&real_cudaMallocManaged, hooked_cudaMallocManaged);
     if (real_cuDeviceTotalMem_v2)
         DetourAttach((PVOID*)&real_cuDeviceTotalMem_v2, hooked_cuDeviceTotalMem_v2);
     if (real_cudaMemGetInfo)
@@ -995,6 +1033,8 @@ static void gb_remove_hooks(void)
         DetourDetach((PVOID*)&real_cuMemAllocAsync, hooked_cuMemAllocAsync);
     if (real_cuMemFreeAsync)
         DetourDetach((PVOID*)&real_cuMemFreeAsync, hooked_cuMemFreeAsync);
+    if (real_cudaMallocManaged)
+        DetourDetach((PVOID*)&real_cudaMallocManaged, hooked_cudaMallocManaged);
     if (real_cuDeviceTotalMem_v2)
         DetourDetach((PVOID*)&real_cuDeviceTotalMem_v2, hooked_cuDeviceTotalMem_v2);
     if (real_cudaMemGetInfo)
@@ -1066,22 +1106,61 @@ static void *gb_iat_hook(HMODULE module, const char *importModule,
 static void gb_install_hooks(void)
 {
     /*
-     * IAT hooking: scan all loaded modules that import CUDA functions
-     * and patch their IAT entries. This is a simplified version —
-     * a production implementation would enumerate all modules.
+     * IAT hooking: scan the main executable's import table and patch
+     * entries for CUDA functions. Less robust than Detours (only patches
+     * the main exe, not DLLs loaded later) but covers the critical paths.
      */
     HMODULE hProcess = GetModuleHandle(NULL);
     if (!hProcess) return;
 
-    /* Hook in the main executable's IAT */
+    /* Runtime API hooks via cudart DLL */
     if (real_cudaMalloc) {
-        void *orig = gb_iat_hook(hProcess, "nvcuda.dll",
+        void *orig = gb_iat_hook(hProcess, "cudart64_12.dll",
                                  "cudaMalloc", hooked_cudaMalloc);
+        if (!orig)
+            orig = gb_iat_hook(hProcess, "cudart64.dll",
+                               "cudaMalloc", hooked_cudaMalloc);
         if (orig) real_cudaMalloc = (pfn_cudaMalloc)orig;
     }
-    /* Additional IAT hooks would go here for other functions */
+    if (real_cudaFree) {
+        void *orig = gb_iat_hook(hProcess, "cudart64_12.dll",
+                                 "cudaFree", hooked_cudaFree);
+        if (!orig)
+            orig = gb_iat_hook(hProcess, "cudart64.dll",
+                               "cudaFree", hooked_cudaFree);
+        if (orig) real_cudaFree = (pfn_cudaFree)orig;
+    }
+    if (real_cudaMemGetInfo) {
+        void *orig = gb_iat_hook(hProcess, "cudart64_12.dll",
+                                 "cudaMemGetInfo", hooked_cudaMemGetInfo);
+        if (!orig)
+            orig = gb_iat_hook(hProcess, "cudart64.dll",
+                               "cudaMemGetInfo", hooked_cudaMemGetInfo);
+        if (orig) real_cudaMemGetInfo = (pfn_cudaMemGetInfo)orig;
+    }
+    /* Driver API hooks via nvcuda.dll */
+    if (real_cuMemAlloc_v2) {
+        void *orig = gb_iat_hook(hProcess, "nvcuda.dll",
+                                 "cuMemAlloc_v2", hooked_cuMemAlloc_v2);
+        if (orig) real_cuMemAlloc_v2 = (pfn_cuMemAlloc_v2)orig;
+    }
+    if (real_cuMemFree_v2) {
+        void *orig = gb_iat_hook(hProcess, "nvcuda.dll",
+                                 "cuMemFree_v2", hooked_cuMemFree_v2);
+        if (orig) real_cuMemFree_v2 = (pfn_cuMemFree_v2)orig;
+    }
+    if (real_cuDeviceTotalMem_v2) {
+        void *orig = gb_iat_hook(hProcess, "nvcuda.dll",
+                                 "cuDeviceTotalMem_v2", hooked_cuDeviceTotalMem_v2);
+        if (orig) real_cuDeviceTotalMem_v2 = (pfn_cuDeviceTotalMem_v2)orig;
+    }
+    if (real_cuMemGetInfo) {
+        void *orig = gb_iat_hook(hProcess, "nvcuda.dll",
+                                 "cuMemGetInfo_v2", hooked_cuMemGetInfo);
+        if (orig) real_cuMemGetInfo = (pfn_cuMemGetInfo)orig;
+    }
 
-    gb_log("hooks installed via IAT patching (limited — use Detours for full support)");
+    gb_log("hooks installed via IAT patching (main exe only, use Detours for full support)");
 }
 
 static void gb_remove_hooks(void)
@@ -1101,6 +1180,10 @@ static void gb_shim_init(void)
     UINT i;
 
     gb_log("=== GreenBoost v2.3 CUDA Shim (Windows) ===");
+
+    /* Ensure DeviceHandle is INVALID_HANDLE_VALUE before any code path
+     * could touch it. Zero-init sets it to 0 which is a valid handle. */
+    gb_config.DeviceHandle = INVALID_HANDLE_VALUE;
 
     /* Initialize hash table locks */
     for (i = 0; i < HT_LOCKS; i++)
@@ -1134,9 +1217,11 @@ static void gb_shim_init(void)
     if (prefetch_thread_handle)
         gb_log("prefetch worker started");
 
-    /* Open pressure event for monitoring */
+    /* Open pressure event for monitoring.
+     * The driver creates it at \BaseNamedObjects\GreenBoostPressure
+     * which maps to the Global\ prefix in user mode. */
     gb_config.PressureEvent = OpenEventW(SYNCHRONIZE, FALSE,
-                                         L"GreenBoostPressure");
+                                         L"Global\\GreenBoostPressure");
     if (gb_config.PressureEvent)
         gb_log("pressure event opened");
 
@@ -1233,3 +1318,4 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 
     return TRUE;
 }
+
