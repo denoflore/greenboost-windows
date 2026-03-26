@@ -86,6 +86,10 @@ typedef CUresult    (*pfn_cuMemHostRegister)(void *, size_t, unsigned int);
 typedef CUresult    (*pfn_cuMemHostUnregister)(void *);
 typedef CUresult    (*pfn_cuMemHostGetDevicePointer)(CUdeviceptr *, void *, unsigned int);
 
+/* UVM prefetch and device query */
+typedef CUresult    (*pfn_cuMemPrefetchAsync)(CUdeviceptr, size_t, CUdevice, CUstream);
+typedef CUresult    (*pfn_cuCtxGetDevice)(CUdevice *);
+
 /* NVML hooks */
 typedef nvmlReturn_t (*pfn_nvmlDeviceGetMemoryInfo)(nvmlDevice_t, nvmlMemory_t *);
 typedef nvmlReturn_t (*pfn_nvmlDeviceGetMemoryInfo_v2)(nvmlDevice_t, nvmlMemory_v2_t *);
@@ -140,6 +144,8 @@ typedef struct {
      * where a CUDA context is guaranteed to exist. */
     BOOL    UvmProbed;         /* TRUE after first-use probe completed */
     BOOL    UvmAvailable;      /* TRUE if cuMemAllocManaged works     */
+    CUdevice GpuDevice;                /* GPU ordinal for prefetch target  */
+    volatile LONG64 UvmAllocatedBytes; /* shim-side UVM accounting         */
 } gb_shim_config_t;
 
 /* ------------------------------------------------------------------ */

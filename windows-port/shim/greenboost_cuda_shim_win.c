@@ -51,6 +51,8 @@ static pfn_cudaMemGetInfo       real_cudaMemGetInfo      = NULL;
 static pfn_cuMemAlloc_v2        real_cuMemAlloc_v2       = NULL;
 static pfn_cuMemFree_v2         real_cuMemFree_v2        = NULL;
 static pfn_cuMemAllocManaged    real_cuMemAllocManaged_drv = NULL;
+static pfn_cuMemPrefetchAsync     real_cuMemPrefetchAsync    = NULL;
+static pfn_cuCtxGetDevice         real_cuCtxGetDevice         = NULL;
 static pfn_cuMemAllocAsync      real_cuMemAllocAsync     = NULL;
 static pfn_cuMemFreeAsync       real_cuMemFreeAsync      = NULL;
 static pfn_cuMemGetInfo         real_cuMemGetInfo        = NULL;
@@ -75,6 +77,8 @@ static HMODULE hNvml    = NULL;   /* nvml.dll */
 typedef struct {
     void  *ptr;
     size_t size;
+    int    is_managed;    /* 1 = use cuMemPrefetchAsync, 0 = PrefetchVirtualMemory */
+    int    to_device;     /* 1 = prefetch to GPU, 0 = demote to CPU */
 } prefetch_req_t;
 
 static prefetch_req_t    prefetch_queue[PREFETCH_QUEUE_SIZE];
@@ -109,19 +113,32 @@ static DWORD WINAPI prefetch_worker(LPVOID arg)
         prefetch_tail = (prefetch_tail + 1) % PREFETCH_QUEUE_SIZE;
         LeaveCriticalSection(&prefetch_cs);
 
-        /* Prefetch pages into RAM — Windows equivalent of madvise(MADV_WILLNEED) */
-        if (pPrefetchVirtualMemory && req.ptr && req.size > 0) {
+        if (req.is_managed && real_cuMemPrefetchAsync) {
+            /* CUDA UVM prefetch to GPU or CPU */
+            CUdevice target = req.to_device
+                ? gb_config.GpuDevice
+                : (CUdevice)-1;            /* CU_DEVICE_CPU = -1 */
+            CUresult pfRet = real_cuMemPrefetchAsync(
+                (CUdeviceptr)(uintptr_t)req.ptr,
+                req.size, target, NULL);
+            gb_log("prefetch: cuMemPrefetchAsync %p size=%zu to %s -> %s",
+                   req.ptr, req.size,
+                   req.to_device ? "GPU" : "CPU",
+                   pfRet == CUDA_SUCCESS ? "OK" : "FAIL");
+        } else if (pPrefetchVirtualMemory && req.ptr && req.size > 0) {
+            /* Win32 RAM prefetch for driver-path allocations */
             WIN32_MEMORY_RANGE_ENTRY range;
             range.VirtualAddress = req.ptr;
             range.NumberOfBytes = req.size;
             pPrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0);
-            gb_log("prefetch: PrefetchVirtualMemory on %p size=%zu", req.ptr, req.size);
+            gb_log("prefetch: PrefetchVirtualMemory on %p size=%zu",
+                   req.ptr, req.size);
         }
     }
     return 0;
 }
 
-static void enqueue_prefetch(void *ptr, size_t size)
+static void enqueue_prefetch(void *ptr, size_t size, int is_managed, int to_device)
 {
     if (!ptr || !prefetch_running)
         return;
@@ -131,6 +148,8 @@ static void enqueue_prefetch(void *ptr, size_t size)
     if (next_head != prefetch_tail) {
         prefetch_queue[prefetch_head].ptr = ptr;
         prefetch_queue[prefetch_head].size = size;
+        prefetch_queue[prefetch_head].is_managed = is_managed;
+        prefetch_queue[prefetch_head].to_device = to_device;
         prefetch_head = next_head;
         WakeConditionVariable(&prefetch_cv);
     }
@@ -399,7 +418,7 @@ static CUresult gb_alloc_from_driver(void **devPtr, size_t size)
     }
 
     /* Enqueue prefetch to bring pages into RAM proactively */
-    enqueue_prefetch(mappedPtr, (size_t)resp.size);
+    enqueue_prefetch(mappedPtr, (size_t)resp.size, 0, 1);
 
     gb_log("GreenBoost alloc: %zuMB -> device ptr %p (buf_id=%d)",
            size >> 20, *devPtr, resp.buf_id);
@@ -421,16 +440,29 @@ static int gb_free_buffer(CUdeviceptr ptr)
     if (!ht_remove(ptr, &size, &is_managed, &mapped_ptr, &buf_id))
         return 0;  /* Not our allocation */
 
-    gb_log("freeing GreenBoost buffer: ptr=%p size=%zuMB buf_id=%d",
-           (void *)(uintptr_t)ptr, size >> 20, buf_id);
+    if (is_managed) {
+        /* UVM allocation: free via CUDA directly */
+        gb_log("freeing UVM buffer: ptr=%p size=%zuMB",
+               (void *)(uintptr_t)ptr, size >> 20);
 
-    /* Unregister from CUDA */
-    if (mapped_ptr && real_cuMemHostUnregister) {
-        real_cuMemHostUnregister(mapped_ptr);
+        if (real_cuMemFree_v2) {
+            CUresult ret = real_cuMemFree_v2(ptr);
+            if (ret != CUDA_SUCCESS)
+                gb_log_err("cuMemFree failed for UVM ptr %p: %d",
+                           (void *)(uintptr_t)ptr, ret);
+        }
+
+        InterlockedAdd64(&gb_config.UvmAllocatedBytes, -(LONG64)size);
+    } else {
+        /* Driver allocation: unregister from CUDA, then free via IOCTL */
+        gb_log("freeing driver buffer: ptr=%p size=%zuMB buf_id=%d",
+               (void *)(uintptr_t)ptr, size >> 20, buf_id);
+
+        if (mapped_ptr && real_cuMemHostUnregister)
+            real_cuMemHostUnregister(mapped_ptr);
+
+        gb_free_driver_buf(buf_id);
     }
-
-    /* Tell driver to unmap from our process and free the pages */
-    gb_free_driver_buf(buf_id);
 
     return 1;
 }
@@ -491,22 +523,81 @@ static void gb_probe_uvm_once(void)
     LeaveCriticalSection(&ht_locks[0]);
 }
 
+/*
+ * Allocate via CUDA Unified Virtual Memory.
+ * The NVIDIA driver manages page migration between VRAM and RAM.
+ * Returns CUDA_SUCCESS on success, error code on failure.
+ */
+static CUresult gb_alloc_uvm(void **devPtr, size_t size)
+{
+    CUdeviceptr dptr = 0;
+    CUresult ret;
+
+    /* Get GPU device ordinal if not yet known */
+    if (gb_config.GpuDevice == 0 && real_cuCtxGetDevice) {
+        CUdevice dev = 0;
+        if (real_cuCtxGetDevice(&dev) == CUDA_SUCCESS)
+            gb_config.GpuDevice = dev;
+    }
+
+    ret = real_cuMemAllocManaged_drv(&dptr, size, CU_MEM_ATTACH_GLOBAL);
+    if (ret != CUDA_SUCCESS) {
+        gb_log("cuMemAllocManaged failed: %d for %zuMB", ret, size >> 20);
+        return ret;
+    }
+
+    /* Prefetch to GPU -- bring pages into VRAM proactively.
+     * Uses NULL stream (default): subsequent CUDA work on this stream
+     * will wait for prefetch to complete. Correct for weight loading. */
+    if (real_cuMemPrefetchAsync) {
+        CUresult pfRet = real_cuMemPrefetchAsync(dptr, size,
+                                                  gb_config.GpuDevice, NULL);
+        if (pfRet != CUDA_SUCCESS)
+            gb_log("cuMemPrefetchAsync hint failed: %d (non-fatal)", pfRet);
+    }
+
+    *devPtr = (void *)(uintptr_t)dptr;
+
+    /* Track: is_managed=1, buf_id=0, mapped_ptr=NULL (no driver buffer) */
+    if (!ht_insert(dptr, size, 1, 0, NULL)) {
+        gb_log_err("hash table full -- freeing UVM allocation");
+        real_cuMemFree_v2(dptr);
+        return CUDA_ERROR_OUT_OF_MEMORY;
+    }
+
+    InterlockedAdd64(&gb_config.UvmAllocatedBytes, (LONG64)size);
+
+    gb_log("UVM alloc: %zuMB -> ptr %p (prefetched to device %d)",
+           size >> 20, *devPtr, gb_config.GpuDevice);
+
+    return CUDA_SUCCESS;
+}
+
 /* ================================================================== */
 /*  CUDA hook implementations                                           */
 /* ================================================================== */
 
 static cudaError_t CUDAAPI hooked_cudaMalloc(void **devPtr, size_t size)
 {
-    /* Deferred UVM probe — runs once on first interception */
+    /* Deferred UVM probe -- runs once on first interception */
     if (!gb_config.UvmProbed)
         gb_probe_uvm_once();
 
     /* Only intercept allocations above threshold */
     if (size >= gb_config.ThresholdBytes && gb_config.Initialized) {
-        CUresult ret = gb_alloc_from_driver(devPtr, size);
-        if (ret == CUDA_SUCCESS)
-            return (cudaError_t)CUDA_SUCCESS;
-        /* Fall through to real CUDA on failure */
+        /* Try UVM first */
+        if (gb_config.UvmAvailable) {
+            CUresult ret = gb_alloc_uvm(devPtr, size);
+            if (ret == CUDA_SUCCESS)
+                return (cudaError_t)CUDA_SUCCESS;
+            gb_log("UVM alloc failed (%d), trying driver path", ret);
+        }
+        /* Fall back to driver + HostRegister */
+        {
+            CUresult ret = gb_alloc_from_driver(devPtr, size);
+            if (ret == CUDA_SUCCESS)
+                return (cudaError_t)CUDA_SUCCESS;
+        }
         gb_log("GreenBoost alloc failed, falling through to real cudaMalloc");
     }
     return real_cudaMalloc(devPtr, size);
@@ -522,26 +613,44 @@ static cudaError_t CUDAAPI hooked_cudaFree(void *devPtr)
 static cudaError_t CUDAAPI hooked_cudaMallocAsync(
     void **devPtr, size_t size, cudaStream_t stream)
 {
+    if (!gb_config.UvmProbed)
+        gb_probe_uvm_once();
+
     if (size >= gb_config.ThresholdBytes && gb_config.Initialized) {
-        CUresult ret = gb_alloc_from_driver(devPtr, size);
-        if (ret == CUDA_SUCCESS)
-            return (cudaError_t)CUDA_SUCCESS;
+        if (gb_config.UvmAvailable) {
+            CUresult ret = gb_alloc_uvm(devPtr, size);
+            if (ret == CUDA_SUCCESS)
+                return (cudaError_t)CUDA_SUCCESS;
+        }
+        {
+            CUresult ret = gb_alloc_from_driver(devPtr, size);
+            if (ret == CUDA_SUCCESS)
+                return (cudaError_t)CUDA_SUCCESS;
+        }
     }
     return real_cudaMallocAsync(devPtr, size, stream);
 }
 
 static CUresult CUDAAPI hooked_cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
 {
-    /* Deferred UVM probe — runs once on first interception */
     if (!gb_config.UvmProbed)
         gb_probe_uvm_once();
 
     if (bytesize >= gb_config.ThresholdBytes && gb_config.Initialized) {
-        void *ptr;
-        CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
-        if (ret == CUDA_SUCCESS) {
-            *dptr = (CUdeviceptr)(uintptr_t)ptr;
-            return CUDA_SUCCESS;
+        void *ptr = NULL;
+        if (gb_config.UvmAvailable) {
+            CUresult ret = gb_alloc_uvm(&ptr, bytesize);
+            if (ret == CUDA_SUCCESS) {
+                *dptr = (CUdeviceptr)(uintptr_t)ptr;
+                return CUDA_SUCCESS;
+            }
+        }
+        {
+            CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
+            if (ret == CUDA_SUCCESS) {
+                *dptr = (CUdeviceptr)(uintptr_t)ptr;
+                return CUDA_SUCCESS;
+            }
         }
     }
     return real_cuMemAlloc_v2(dptr, bytesize);
@@ -557,12 +666,24 @@ static CUresult CUDAAPI hooked_cuMemFree_v2(CUdeviceptr dptr)
 static CUresult CUDAAPI hooked_cuMemAllocAsync(
     CUdeviceptr *dptr, size_t bytesize, CUstream hStream)
 {
+    if (!gb_config.UvmProbed)
+        gb_probe_uvm_once();
+
     if (bytesize >= gb_config.ThresholdBytes && gb_config.Initialized) {
-        void *ptr;
-        CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
-        if (ret == CUDA_SUCCESS) {
-            *dptr = (CUdeviceptr)(uintptr_t)ptr;
-            return CUDA_SUCCESS;
+        void *ptr = NULL;
+        if (gb_config.UvmAvailable) {
+            CUresult ret = gb_alloc_uvm(&ptr, bytesize);
+            if (ret == CUDA_SUCCESS) {
+                *dptr = (CUdeviceptr)(uintptr_t)ptr;
+                return CUDA_SUCCESS;
+            }
+        }
+        {
+            CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
+            if (ret == CUDA_SUCCESS) {
+                *dptr = (CUdeviceptr)(uintptr_t)ptr;
+                return CUDA_SUCCESS;
+            }
         }
     }
     return real_cuMemAllocAsync(dptr, bytesize, hStream);
@@ -760,6 +881,10 @@ static void gb_resolve_symbols(void)
         GetProcAddress(hCudaDrv, "cuDeviceTotalMem_v2");
     real_cuMemAllocManaged_drv = (pfn_cuMemAllocManaged)
         GetProcAddress(hCudaDrv, "cuMemAllocManaged");
+    real_cuMemPrefetchAsync = (pfn_cuMemPrefetchAsync)
+        GetProcAddress(hCudaDrv, "cuMemPrefetchAsync");
+    real_cuCtxGetDevice = (pfn_cuCtxGetDevice)
+        GetProcAddress(hCudaDrv, "cuCtxGetDevice");
     real_cuMemHostRegister = (pfn_cuMemHostRegister)
         GetProcAddress(hCudaDrv, "cuMemHostRegister_v2");
     real_cuMemHostUnregister = (pfn_cuMemHostUnregister)
@@ -799,9 +924,10 @@ static void gb_resolve_symbols(void)
     }
 
     gb_log("symbols resolved: cuMemAlloc=%p cudaMalloc=%p cuMemHostRegister=%p "
-           "cuMemAllocManaged=%p",
+           "cuMemAllocManaged=%p cuMemPrefetchAsync=%p",
            (void*)real_cuMemAlloc_v2, (void*)real_cudaMalloc,
-           (void*)real_cuMemHostRegister, (void*)real_cuMemAllocManaged_drv);
+           (void*)real_cuMemHostRegister, (void*)real_cuMemAllocManaged_drv,
+           (void*)real_cuMemPrefetchAsync);
 }
 
 /* ================================================================== */
@@ -983,6 +1109,10 @@ static void gb_shim_init(void)
     /* Clear hash table */
     memset(gb_htable, 0, sizeof(gb_htable));
 
+    /* Initialize UVM state (probe deferred to first interception) */
+    gb_config.GpuDevice = 0;
+    gb_config.UvmAllocatedBytes = 0;
+
     /* Read configuration */
     gb_read_config();
 
@@ -1047,12 +1177,19 @@ static void gb_shim_cleanup(void)
     for (i = 0; i < HT_SIZE; i++) {
         gb_ht_entry_t *e = &gb_htable[i];
         if (e->ptr != HT_EMPTY && e->ptr != HT_TOMBSTONE) {
-            gb_log("cleanup: freeing leaked buffer ptr=%p size=%zu buf_id=%d",
-                   (void*)(uintptr_t)e->ptr, e->size, e->gb_buf_id);
-            if (e->mapped_ptr && real_cuMemHostUnregister)
-                real_cuMemHostUnregister(e->mapped_ptr);
-            /* Tell driver to unmap and free */
-            gb_free_driver_buf(e->gb_buf_id);
+            gb_log("cleanup: freeing leaked buffer ptr=%p size=%zu is_managed=%d buf_id=%d",
+                   (void*)(uintptr_t)e->ptr, e->size, e->is_managed, e->gb_buf_id);
+
+            if (e->is_managed) {
+                /* UVM: free directly */
+                if (real_cuMemFree_v2)
+                    real_cuMemFree_v2(e->ptr);
+            } else {
+                /* Driver: unregister + IOCTL free */
+                if (e->mapped_ptr && real_cuMemHostUnregister)
+                    real_cuMemHostUnregister(e->mapped_ptr);
+                gb_free_driver_buf(e->gb_buf_id);
+            }
         }
     }
 
