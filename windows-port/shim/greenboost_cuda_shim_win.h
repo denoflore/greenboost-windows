@@ -24,6 +24,11 @@
 /*  Minimal CUDA type definitions (no CUDA SDK headers needed)          */
 /* ------------------------------------------------------------------ */
 
+/* CUDA calling convention for Windows */
+#ifndef CUDAAPI
+#define CUDAAPI __stdcall
+#endif
+
 typedef unsigned long long CUdeviceptr;
 typedef int                CUresult;
 typedef int                cudaError_t;

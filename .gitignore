@@ -32,3 +32,30 @@ __pycache__/
 # Python venv (managed by greenboost_setup.sh)
 venv/
 .venv/
+
+# Windows build artifacts
+build/
+*.exe
+*.dll
+*.sys
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.obj
+*.log
+vc*.idb
+
+# Windows driver build
+driver/build/
+
+# Generated outputs (collected by build.ps1)
+windows-port/tools/outputs/
+
+# Test signing certificates (DO NOT COMMIT)
+*.pfx
+*.cer
+*.snk
+
+# Backup directories
+*_backup/

@@ -32,10 +32,32 @@ target_link_libraries(greenboost_cuda PRIVATE
     psapi      # Process info
 )
 
-# Microsoft Detours — link if available
-find_library(DETOURS_LIB detours)
-if(DETOURS_LIB)
-    target_link_libraries(greenboost_cuda PRIVATE ${DETOURS_LIB})
+# Microsoft Detours — use it when both header and library are available.
+# vcpkg typically installs header as <prefix>/include/detours.h.
+# Clear stale cache from previous find_path patterns.
+unset(DETOURS_INCLUDE_DIR CACHE)
+find_path(DETOURS_INCLUDE_DIR_REAL
+    NAMES detours.h
+    PATH_SUFFIXES detours
+)
+find_library(DETOURS_LIBRARY_RELEASE
+    NAMES detours
+    PATH_SUFFIXES lib
+)
+find_library(DETOURS_LIBRARY_DEBUG
+    NAMES detours
+    PATH_SUFFIXES debug/lib
+)
+
+if(DETOURS_INCLUDE_DIR_REAL AND (DETOURS_LIBRARY_RELEASE OR DETOURS_LIBRARY_DEBUG))
+    message(STATUS "Detours found: ${DETOURS_INCLUDE_DIR_REAL}")
+    target_include_directories(greenboost_cuda PRIVATE ${DETOURS_INCLUDE_DIR_REAL})
+    if(DETOURS_LIBRARY_RELEASE)
+        target_link_libraries(greenboost_cuda PRIVATE optimized ${DETOURS_LIBRARY_RELEASE})
+    endif()
+    if(DETOURS_LIBRARY_DEBUG)
+        target_link_libraries(greenboost_cuda PRIVATE debug ${DETOURS_LIBRARY_DEBUG})
+    endif()
     target_compile_definitions(greenboost_cuda PRIVATE GB_USE_DETOURS=1)
 else()
     message(STATUS "Detours not found — shim will use manual IAT hooking")

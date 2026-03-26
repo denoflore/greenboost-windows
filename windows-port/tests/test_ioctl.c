@@ -367,7 +367,7 @@ static void test_pressure_event(void)
 
     TEST_START("pressure event accessibility");
 
-    hEvent = OpenEventW(SYNCHRONIZE, FALSE, L"GreenBoostPressure");
+    hEvent = OpenEventW(SYNCHRONIZE, FALSE, L"Global\\GreenBoostPressure");
     TEST_ASSERT(hEvent != NULL,
                 "OpenEvent failed (err=%lu) — is the driver loaded?",
                 GetLastError());

@@ -33,9 +33,9 @@ greenboost_win.sys = 1,,
 ; ----------------------------------------------------------------
 
 [Manufacturer]
-%ManufacturerName% = Standard,NTamd64
+%ManufacturerName% = Standard,NT$ARCH$.10.0...16299
 
-[Standard.NTamd64]
+[Standard.NTamd64.10.0...16299]
 %DeviceDesc% = GreenBoost_Install, Root\GreenBoost
 
 ; ----------------------------------------------------------------
@@ -70,7 +70,7 @@ ServiceBinary  = %13%\greenboost_win.sys
 KmdfService = GreenBoost, GreenBoost_wdfsect
 
 [GreenBoost_wdfsect]
-KmdfLibraryVersion = 1.33
+KmdfLibraryVersion = $KMDFVERSION$
 
 ; ----------------------------------------------------------------
 ;  Strings
