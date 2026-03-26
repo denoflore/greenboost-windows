@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only
+﻿/* SPDX-License-Identifier: GPL-2.0-only
  * Copyright (C) 2024-2026 Ferran Duarri. Dual-licensed: GPL v2 + Commercial.
  *
  * GreenBoost v2.3 — Windows KMDF Driver
@@ -34,13 +34,35 @@ GB_DEVICE_WIN GbGlobalDevice = { 0 };
 
 /* ================================================================== */
 /*  Configuration — read from registry                                  */
+/*                                                                        */
+/*  Config path: HKLM\SYSTEM\CurrentControlSet\Services\GreenBoost\Parameters */
+/*  Uses absolute path with ZwOpenKey for reliability.                  */
 /* ================================================================== */
+
+static NTSTATUS GbQueryRegUlong(HANDLE hKey, PUNICODE_STRING valName, PULONG pValue)
+{
+    NTSTATUS status;
+    ULONG resultLen;
+    BYTE buffer[sizeof(KEY_VALUE_FULL_INFORMATION) + 256];
+    PKEY_VALUE_FULL_INFORMATION pInfo = (PKEY_VALUE_FULL_INFORMATION)buffer;
+
+    RtlZeroMemory(buffer, sizeof(buffer));
+    status = ZwQueryValueKey(hKey, valName, KeyValueFullInformation,
+                              pInfo, sizeof(buffer), &resultLen);
+    if (NT_SUCCESS(status) && pInfo->Type == REG_DWORD && pInfo->DataLength == sizeof(ULONG)) {
+        *pValue = *(PULONG)((PUCHAR)pInfo + pInfo->DataOffset);
+        return STATUS_SUCCESS;
+    }
+    return STATUS_UNSUCCESSFUL;
+}
 
 NTSTATUS GbReadConfig(VOID)
 {
     NTSTATUS status;
-    WDFKEY hKey = NULL;
-    DECLARE_CONST_UNICODE_STRING(regPath, L"\\Registry\\Machine\\SOFTWARE\\GreenBoost");
+    HANDLE hKey = NULL;
+    OBJECT_ATTRIBUTES oa;
+    UNICODE_STRING keyPath;
+
     DECLARE_CONST_UNICODE_STRING(valPhysVram, L"PhysicalVramGb");
     DECLARE_CONST_UNICODE_STRING(valVirtVram, L"VirtualVramGb");
     DECLARE_CONST_UNICODE_STRING(valSafety, L"SafetyReserveGb");
@@ -48,7 +70,6 @@ NTSTATUS GbReadConfig(VOID)
     DECLARE_CONST_UNICODE_STRING(valNvmePool, L"NvmePoolGb");
     DECLARE_CONST_UNICODE_STRING(valThreshold, L"ThresholdMb");
     DECLARE_CONST_UNICODE_STRING(valDebug, L"DebugMode");
-    ULONG value;
 
     /* Set defaults first */
     GbGlobalDevice.PhysicalVramGb  = GB_DEFAULT_PHYSICAL_VRAM_GB;
@@ -59,29 +80,25 @@ NTSTATUS GbReadConfig(VOID)
     GbGlobalDevice.ThresholdMb     = GB_DEFAULT_THRESHOLD_MB;
     GbGlobalDevice.DebugMode       = GB_DEFAULT_DEBUG_MODE;
 
-    /* Try to open registry key — failure is OK, we use defaults */
-    status = WdfRegistryOpenKey(NULL, &regPath, KEY_READ, WDF_NO_OBJECT_ATTRIBUTES, &hKey);
+    /* Open registry key using absolute path */
+    RtlInitUnicodeString(&keyPath, L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\GreenBoost\\Parameters");
+    InitializeObjectAttributes(&oa, &keyPath, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
+
+    status = ZwOpenKey(&hKey, KEY_READ, &oa);
     if (!NT_SUCCESS(status)) {
-        gb_info("Registry key not found, using defaults");
+        gb_info("Parameters key not found (0x%08X), using defaults", status);
         return STATUS_SUCCESS;
     }
 
-    if (NT_SUCCESS(WdfRegistryQueryULong(hKey, &valPhysVram, &value)))
-        GbGlobalDevice.PhysicalVramGb = value;
-    if (NT_SUCCESS(WdfRegistryQueryULong(hKey, &valVirtVram, &value)))
-        GbGlobalDevice.VirtualVramGb = value;
-    if (NT_SUCCESS(WdfRegistryQueryULong(hKey, &valSafety, &value)))
-        GbGlobalDevice.SafetyReserveGb = value;
-    if (NT_SUCCESS(WdfRegistryQueryULong(hKey, &valNvmeSwap, &value)))
-        GbGlobalDevice.NvmeSwapGb = value;
-    if (NT_SUCCESS(WdfRegistryQueryULong(hKey, &valNvmePool, &value)))
-        GbGlobalDevice.NvmePoolGb = value;
-    if (NT_SUCCESS(WdfRegistryQueryULong(hKey, &valThreshold, &value)))
-        GbGlobalDevice.ThresholdMb = value;
-    if (NT_SUCCESS(WdfRegistryQueryULong(hKey, &valDebug, &value)))
-        GbGlobalDevice.DebugMode = value;
+    GbQueryRegUlong(hKey, (PUNICODE_STRING)&valPhysVram, &GbGlobalDevice.PhysicalVramGb);
+    GbQueryRegUlong(hKey, (PUNICODE_STRING)&valVirtVram, &GbGlobalDevice.VirtualVramGb);
+    GbQueryRegUlong(hKey, (PUNICODE_STRING)&valSafety, &GbGlobalDevice.SafetyReserveGb);
+    GbQueryRegUlong(hKey, (PUNICODE_STRING)&valNvmeSwap, &GbGlobalDevice.NvmeSwapGb);
+    GbQueryRegUlong(hKey, (PUNICODE_STRING)&valNvmePool, &GbGlobalDevice.NvmePoolGb);
+    GbQueryRegUlong(hKey, (PUNICODE_STRING)&valThreshold, &GbGlobalDevice.ThresholdMb);
+    GbQueryRegUlong(hKey, (PUNICODE_STRING)&valDebug, &GbGlobalDevice.DebugMode);
 
-    WdfRegistryClose(hKey);
+    ZwClose(hKey);
 
     gb_info("Config loaded: T1=%luGB T2=%luGB reserve=%luGB T3=%luGB/%luGB thresh=%luMB debug=%lu",
             GbGlobalDevice.PhysicalVramGb,
@@ -101,12 +118,8 @@ NTSTATUS GbReadConfig(VOID)
 
 VOID GbQueryMemoryStatus(_Out_ PULONG64 TotalBytes, _Out_ PULONG64 AvailBytes)
 {
-    /*
-     * In kernel mode, query system memory via ZwQuerySystemInformation.
-     * SystemBasicInformation gives total physical pages.
-     * SystemPerformanceInformation gives available pages.
-     */
     SYSTEM_BASIC_INFORMATION basicInfo = { 0 };
+    SYSTEM_PERFORMANCE_INFORMATION perfInfo = { 0 };
     NTSTATUS status;
     ULONG retLen;
 
@@ -118,14 +131,11 @@ VOID GbQueryMemoryStatus(_Out_ PULONG64 TotalBytes, _Out_ PULONG64 AvailBytes)
     if (NT_SUCCESS(status)) {
         *TotalBytes = (ULONG64)basicInfo.NumberOfPhysicalPages * basicInfo.PageSize;
 
-        /*
-         * For available memory, use MmAvailablePages if accessible,
-         * or fall back to a conservative estimate.
-         * MmAvailablePages is an exported kernel variable on most
-         * Windows versions.
-         */
-        ULONG64 availPages = MmAvailablePages;
-        *AvailBytes = availPages * basicInfo.PageSize;
+        status = ZwQuerySystemInformation(SystemPerformanceInformation,
+                                          &perfInfo, sizeof(perfInfo), &retLen);
+        if (NT_SUCCESS(status)) {
+            *AvailBytes = (ULONG64)perfInfo.AvailablePages * basicInfo.PageSize;
+        }
     }
 }
 
@@ -398,7 +408,7 @@ PGB_BUF_WIN GbAllocTier2(_In_ SIZE_T Size, _In_ ULONG Flags)
         sysAddr = MmGetSystemAddressForMdlSafe(mdl, NormalPagePriority);
         if (!sysAddr) {
             MmFreePagesFromMdl(mdl);
-            ExFreeIoMdl(mdl);
+            IoFreeMdl(mdl);
             ExFreePoolWithTag(buf, GB_TAG);
             gb_err("MmGetSystemAddressForMdlSafe failed");
             return NULL;
@@ -763,7 +773,7 @@ static NTSTATUS GbCreatePressureEvent(VOID)
 
     RtlInitUnicodeString(&eventName, GB_PRESSURE_EVENT);
     InitializeObjectAttributes(&oa, &eventName,
-                               OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE,
+                               OBJ_CASE_INSENSITIVE | OBJ_OPENIF,
                                NULL, NULL);
 
     status = ZwCreateEvent(&eventHandle, EVENT_ALL_ACCESS, &oa,
@@ -1396,7 +1406,7 @@ NTSTATUS DriverEntry(
     InitializeListHead(&GbGlobalDevice.LruList);
     KeInitializeSpinLock(&GbGlobalDevice.LruLock);
 
-    /* Read configuration from registry */
+    /* Read configuration from registry (uses ZwOpenKey, no WDF dependency) */
     GbReadConfig();
 
     gb_info("T1 VRAM : %lu GB", GbGlobalDevice.PhysicalVramGb);
