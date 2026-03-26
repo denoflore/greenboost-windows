@@ -22,6 +22,7 @@ param(
 $ErrorActionPreference = "Stop"
 $GreenBoostVersion = "2.3.0"
 $RegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\GreenBoost\Parameters"
+$ShimRegPath = "HKLM:\SOFTWARE\GreenBoost"  # Shim reads from here too (legacy + fallback)
 $DriverName = "GreenBoost"
 $ShimDll = "greenboost_cuda.dll"
 $DriverSys = "greenboost_win.sys"
@@ -143,7 +144,17 @@ function Set-GreenBoostConfig {
     Set-ItemProperty -Path $RegPath -Name "ThresholdMb"     -Value $thresholdMb     -Type DWord
     Set-ItemProperty -Path $RegPath -Name "DebugMode"       -Value 0                -Type DWord
 
-    Write-Status "Registry configuration written to $RegPath"
+    # Mirror to SOFTWARE\GreenBoost for shim backward compatibility.
+    # The shim now reads Services path first but falls back here.
+    if (-not (Test-Path $ShimRegPath)) {
+        New-Item -Path $ShimRegPath -Force | Out-Null
+    }
+    Set-ItemProperty -Path $ShimRegPath -Name "PhysicalVramGb"  -Value $PhysicalVramGb  -Type DWord
+    Set-ItemProperty -Path $ShimRegPath -Name "VirtualVramGb"   -Value $virtualVramGb   -Type DWord
+    Set-ItemProperty -Path $ShimRegPath -Name "ThresholdMb"     -Value $thresholdMb     -Type DWord
+    Set-ItemProperty -Path $ShimRegPath -Name "DebugMode"       -Value 0                -Type DWord
+
+    Write-Status "Registry configuration written to $RegPath and $ShimRegPath"
 }
 
 function Install-GreenBoostDriver {
@@ -382,12 +393,6 @@ withdll.exe /d:"$shimDllPath" "$($lmStudioExe.FullName)"
         }
     }
 
-    $ollamaPath = (Get-Command ollama -ErrorAction SilentlyContinue)
-    if ($ollamaPath) {
-        Write-Status "Ollama detected at $($ollamaPath.Source)"
-        Write-Status "Launch with: withdll.exe /d:$shimDllPath ollama serve"
-    }
-
     Write-Status ""
     Write-Status "Shim DLL location: $shimDllPath"
     Write-Status "Injection methods:"
@@ -428,7 +433,11 @@ if ($Uninstall) {
     if (-not $SkipDriver) { Uninstall-GreenBoostDriver }
     if (Test-Path $RegPath) {
         Remove-Item -Path $RegPath -Recurse -Force
-        Write-Status "Registry configuration removed"
+        Write-Status "Registry configuration removed ($RegPath)"
+    }
+    if (Test-Path $ShimRegPath) {
+        Remove-Item -Path $ShimRegPath -Recurse -Force
+        Write-Status "Registry configuration removed ($ShimRegPath)"
     }
     Write-Status "Uninstall complete"
     exit 0
@@ -461,3 +470,4 @@ Write-Status "Combined model capacity: $($gpu.VramGb + [math]::Floor($ramGb * 0.
 Write-Status "  T1 GPU VRAM : $($gpu.VramGb) GB"
 Write-Status "  T2 DDR4     : $([math]::Floor($ramGb * 0.8)) GB"
 Write-Status "  T3 NVMe     : 64 GB"
+

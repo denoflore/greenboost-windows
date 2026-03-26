@@ -881,6 +881,16 @@ NTSTATUS GbHandleAlloc(_In_ WDFREQUEST Request)
             (ULONG64)buf->Size >> 20, buf->Id,
             buf->Tier == GB_TIER2_DDR4 ? "T2-DDR4" : "T3-NVMe");
 
+    /* Track buffer ownership for crash cleanup */
+    {
+        WDFFILEOBJECT fileObj = WdfRequestGetFileObject(Request);
+        if (fileObj) {
+            PGB_FILE_CONTEXT fileCtx = GbGetFileContext(fileObj);
+            if (fileCtx)
+                GbFileContextSetBuf(fileCtx, buf->Id);
+        }
+    }
+
     return STATUS_SUCCESS;
 }
 
@@ -915,6 +925,16 @@ NTSTATUS GbHandleFree(_In_ WDFREQUEST Request)
 
     gb_info("freeing buf id=%ld size=%lluMB (explicit)",
             buf->Id, (ULONG64)buf->Size >> 20);
+
+    /* Clear ownership tracking */
+    {
+        WDFFILEOBJECT fileObj = WdfRequestGetFileObject(Request);
+        if (fileObj) {
+            PGB_FILE_CONTEXT fileCtx = GbGetFileContext(fileObj);
+            if (fileCtx)
+                GbFileContextClearBuf(fileCtx, req->buf_id);
+        }
+    }
 
     GbFreeBuf(buf);
     return STATUS_SUCCESS;
@@ -977,8 +997,36 @@ NTSTATUS GbHandleGetInfo(_In_ WDFREQUEST Request)
 
 NTSTATUS GbHandleReset(_In_ WDFREQUEST Request)
 {
+    LONG i, freed = 0;
+
     UNREFERENCED_PARAMETER(Request);
-    gb_info("RESET requested — close all handles to release buffers");
+
+    gb_info("RESET requested -- freeing all active buffers");
+
+    /*
+     * Walk the buffer table and free every active buffer.
+     * We must be careful to not hold BufLock while calling GbFreeBuf
+     * (which also acquires it), so we snapshot + null each entry.
+     */
+    for (i = 1; i < GB_MAX_BUFS; i++) {
+        PGB_BUF_WIN buf;
+
+        ExAcquireFastMutex(&GbGlobalDevice.BufLock);
+        buf = GbGlobalDevice.BufTable[i];
+        if (buf && buf->Active) {
+            GbGlobalDevice.BufTable[i] = NULL;
+            ExReleaseFastMutex(&GbGlobalDevice.BufLock);
+
+            InterlockedDecrement(&GbGlobalDevice.ActiveBufs);
+            buf->Id = 0;  /* prevent GbFreeBuf from double-unregistering */
+            GbFreeBuf(buf);
+            freed++;
+        } else {
+            ExReleaseFastMutex(&GbGlobalDevice.BufLock);
+        }
+    }
+
+    gb_info("RESET complete: freed %ld buffers", freed);
     return STATUS_SUCCESS;
 }
 
@@ -1047,19 +1095,32 @@ NTSTATUS GbHandleEvict(_In_ WDFREQUEST Request)
     if (!buf)
         return STATUS_NOT_FOUND;
 
-    /* Move T2 accounting to T3 (conceptual eviction) */
+    /*
+     * Eviction on Windows is a soft operation: we cannot move contiguous
+     * or MDL-backed pages to the pagefile without unmapping the user VA
+     * (which would crash the shim's cuMemHostRegister mapping).
+     *
+     * What we DO: remove from LRU so this buffer is not a candidate for
+     * future eviction, and mark it as T3 for the shim's bookkeeping.
+     *
+     * What we DON'T do: adjust T2/T3 pool accounting. The physical RAM
+     * is still consumed. Lying about it was causing the T2 safety reserve
+     * math to report false headroom, leading to OOM when the shim
+     * allocated more buffers thinking it had freed capacity.
+     *
+     * The shim should treat EVICT as "this buffer is deprioritized"
+     * rather than "this buffer's RAM was reclaimed."
+     */
     if (buf->Tier == GB_TIER2_DDR4) {
-        InterlockedAdd64(&GbGlobalDevice.PoolAllocated, -(LONG64)buf->Size);
-        InterlockedAdd64(&GbGlobalDevice.NvmeAllocated, (LONG64)buf->Size);
         buf->Tier = GB_TIER3_NVME;
 
-        /* Remove from LRU — evicted buffers are not candidates */
+        /* Remove from LRU -- evicted buffers are not candidates */
         KeAcquireSpinLock(&GbGlobalDevice.LruLock, &oldIrql);
         RemoveEntryList(&buf->LruNode);
         InitializeListHead(&buf->LruNode);
         KeReleaseSpinLock(&GbGlobalDevice.LruLock, oldIrql);
 
-        gb_dbg("evict buf id=%ld: T2->T3 (%lluMB)",
+        gb_info("evict buf id=%ld: T2->T3 (soft, %lluMB still in RAM)",
                buf->Id, (ULONG64)buf->Size >> 20);
     }
 
@@ -1205,6 +1266,16 @@ NTSTATUS GbHandlePinUserPtr(_In_ WDFREQUEST Request)
     gb_info("pinned %lluMB user buffer (id=%ld)",
             (ULONG64)buf->Size >> 20, buf->Id);
 
+    /* Track buffer ownership for crash cleanup */
+    {
+        WDFFILEOBJECT fileObj = WdfRequestGetFileObject(Request);
+        if (fileObj) {
+            PGB_FILE_CONTEXT fileCtx = GbGetFileContext(fileObj);
+            if (fileCtx)
+                GbFileContextSetBuf(fileCtx, buf->Id);
+        }
+    }
+
     return STATUS_SUCCESS;
 }
 
@@ -1259,6 +1330,42 @@ VOID GbEvtIoDeviceControl(
 }
 
 /* ================================================================== */
+/*  File cleanup -- free all buffers owned by a closing handle          */
+/*                                                                      */
+/*  Called when a process closes its handle or crashes/is killed.       */
+/*  This is the fix for permanent memory leaks: without this, a        */
+/*  crashed shim process would leave pinned pages allocated forever.    */
+/* ================================================================== */
+
+VOID GbEvtFileCleanup(_In_ WDFFILEOBJECT FileObject)
+{
+    PGB_FILE_CONTEXT fileCtx;
+    LONG i, freed = 0;
+
+    fileCtx = GbGetFileContext(FileObject);
+    if (!fileCtx || fileCtx->OwnedCount == 0)
+        return;
+
+    gb_info("file cleanup: freeing %ld buffer(s) for closing handle (pid=%lu)",
+            fileCtx->OwnedCount,
+            (ULONG)(ULONG_PTR)PsGetCurrentProcessId());
+
+    for (i = 1; i < GB_MAX_BUFS && freed < fileCtx->OwnedCount; i++) {
+        if (GbFileContextOwnsBuf(fileCtx, i)) {
+            PGB_BUF_WIN buf = GbLookupBuf(i);
+            if (buf) {
+                gb_dbg("file cleanup: freeing buf id=%ld size=%lluMB",
+                       i, (ULONG64)buf->Size >> 20);
+                GbFreeBuf(buf);
+            }
+            freed++;
+        }
+    }
+
+    gb_info("file cleanup: freed %ld buffer(s)", freed);
+}
+
+/* ================================================================== */
 /*  WDF device creation                                                 */
 /* ================================================================== */
 
@@ -1286,10 +1393,10 @@ NTSTATUS GbEvtDeviceAdd(
     WdfDeviceInitSetDeviceType(DeviceInit, FILE_DEVICE_UNKNOWN);
     WdfDeviceInitSetIoType(DeviceInit, WdfDeviceIoBuffered);
 
-    /* Allow non-admin access */
+    /* Allow interactive user access (not World/Everyone) */
     {
         DECLARE_CONST_UNICODE_STRING(sddl,
-            L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;WD)");
+            L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)");
         status = WdfDeviceInitAssignSDDLString(DeviceInit, &sddl);
         if (!NT_SUCCESS(status)) {
             gb_err("WdfDeviceInitAssignSDDLString failed: 0x%08X", status);
@@ -1302,6 +1409,30 @@ NTSTATUS GbEvtDeviceAdd(
         WDF_OBJECT_ATTRIBUTES deviceAttrs;
         WDF_OBJECT_ATTRIBUTES_INIT(&deviceAttrs);
         deviceAttrs.EvtCleanupCallback = GbEvtDeviceCleanup;
+
+        /*
+         * Register file object context and cleanup callback.
+         * Each CreateFile() gets a GB_FILE_CONTEXT that tracks which
+         * buffer IDs were allocated through this handle. On process
+         * exit or crash, EvtFileCleanup fires and frees them all.
+         * This prevents permanent memory leaks from dead processes.
+         */
+        {
+            WDF_FILEOBJECT_CONFIG fileConfig;
+            WDF_OBJECT_ATTRIBUTES fileAttrs;
+
+            WDF_FILEOBJECT_CONFIG_INIT(&fileConfig,
+                                        NULL,              /* EvtFileCreate */
+                                        NULL,              /* EvtFileClose */
+                                        GbEvtFileCleanup); /* EvtFileCleanup */
+            WdfDeviceInitSetFileObjectConfig(DeviceInit,
+                                             &fileConfig,
+                                             WDF_NO_OBJECT_ATTRIBUTES);
+
+            /* Attach GB_FILE_CONTEXT to each WDFFILEOBJECT */
+            WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&fileAttrs, GB_FILE_CONTEXT);
+            WdfDeviceInitSetFileObjectConfig(DeviceInit, &fileConfig, &fileAttrs);
+        }
 
         status = WdfDeviceCreate(&DeviceInit, &deviceAttrs, &device);
         if (!NT_SUCCESS(status)) {
@@ -1432,3 +1563,4 @@ NTSTATUS DriverEntry(
 
     return STATUS_SUCCESS;
 }
+

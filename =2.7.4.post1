@@ -1,5 +1,0 @@
-Defaulting to user installation because normal site-packages is not writeable
-Collecting flash_attn
-  Using cached flash_attn-2.8.3.tar.gz (8.4 MB)
-  Preparing metadata (setup.py): started
-  Preparing metadata (setup.py): finished with status 'error'

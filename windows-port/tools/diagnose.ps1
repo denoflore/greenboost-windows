@@ -11,7 +11,8 @@
 param()
 
 $ErrorActionPreference = "SilentlyContinue"
-$RegPath = "HKLM:\SOFTWARE\GreenBoost"
+$RegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\GreenBoost\Parameters"
+$ShimRegPath = "HKLM:\SOFTWARE\GreenBoost"
 $issues = @()
 
 function Write-Check($msg, $ok) {
@@ -113,7 +114,7 @@ Write-Host ""
 Write-Host "4. Registry Configuration" -ForegroundColor Yellow
 
 if (Test-Path $RegPath) {
-    Write-Check "Registry key exists ($RegPath)" $true
+    Write-Check "Driver registry key exists ($RegPath)" $true
     $regValues = Get-ItemProperty -Path $RegPath
     Write-Info "PhysicalVramGb  : $($regValues.PhysicalVramGb)"
     Write-Info "VirtualVramGb   : $($regValues.VirtualVramGb)"
@@ -122,8 +123,15 @@ if (Test-Path $RegPath) {
     Write-Info "ThresholdMb     : $($regValues.ThresholdMb)"
     Write-Info "DebugMode       : $($regValues.DebugMode)"
 } else {
-    Write-Check "Registry key exists ($RegPath)" $false
+    Write-Check "Driver registry key exists ($RegPath)" $false
     Write-Info "Run install.ps1 to create configuration"
+}
+
+if (Test-Path $ShimRegPath) {
+    Write-Check "Shim registry key exists ($ShimRegPath)" $true
+} else {
+    Write-Check "Shim registry key exists ($ShimRegPath)" $false
+    Write-Info "Shim will read from driver key as primary source"
 }
 
 Write-Host ""
@@ -203,7 +211,7 @@ Write-Check "nvml.dll present" $nvmlExists
 Write-Host ""
 
 # ----------------------------------------------------------------
-#  7. LM Studio / Ollama
+#  7. LM Studio Detection
 # ----------------------------------------------------------------
 
 Write-Host "7. Application Detection" -ForegroundColor Yellow
@@ -215,12 +223,6 @@ if (Test-Path $lmStudioPath) {
     Write-Check "GreenBoost launcher present" (Test-Path $launcherPath)
 } else {
     Write-Info "LM Studio not found at $lmStudioPath"
-}
-
-$ollamaCmd = Get-Command ollama -ErrorAction SilentlyContinue
-Write-Check "Ollama installed" ($null -ne $ollamaCmd)
-if ($ollamaCmd) {
-    Write-Info "Ollama path: $($ollamaCmd.Source)"
 }
 
 Write-Host ""
@@ -239,3 +241,4 @@ if ($issues.Count -eq 0) {
     }
 }
 Write-Host ""
+

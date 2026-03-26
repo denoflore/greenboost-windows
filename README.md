@@ -32,21 +32,58 @@ This is my first actually useful open source contribution. I've got research rep
 
 Everything from Ferran's original repo (untouched, his README preserved as `README_original_ferran.md`) plus a complete `windows-port/` directory:
 
-| Component | File | Lines | What it does |
-|-----------|------|-------|-------------|
-| KMDF Driver | `driver/greenboost_win.c` | 1,424 | Windows kernel driver replacing `greenboost.ko`. Allocates pinned 2MB contiguous memory blocks, maps them directly into userspace via MDL, monitors memory pressure, manages buffer lifecycle. |
-| Driver Header | `driver/greenboost_win.h` | 193 | Per-buffer and global device state structs. |
-| IOCTL Header | `driver/greenboost_ioctl_win.h` | 165 | Windows IOCTL definitions using CTL_CODE. Shared between driver and shim. |
-| CUDA Shim | `shim/greenboost_cuda_shim_win.c` | 1,030 | DLL that hooks cudaMalloc/cudaFree via Microsoft Detours. Routes large allocations to the driver, spoofs VRAM reporting so LM Studio/Ollama see the extended memory. |
-| Shim Header | `shim/greenboost_cuda_shim_win.h` | 155 | Hash table, config struct, CUDA type definitions. |
-| Driver INF | `driver/greenboost_win.inf` | 84 | Standard KMDF driver installation manifest. |
-| Installer | `tools/install.ps1` | 300 | PowerShell script that detects your hardware, computes optimal config, writes registry keys, installs the driver. |
-| Diagnostics | `tools/diagnose.ps1` | 241 | Health check script. |
-| IOCTL Tests | `tests/test_ioctl.c` | 442 | Smoke tests and stress tests for the driver interface. |
-| Build System | `CMakeLists.txt` (x3) | 106 | CMake configs for driver, shim, and tests. |
-| Docs | `BUILDING.md`, `TROUBLESHOOTING.md` | 240 | Build from source instructions and common fixes. |
+**Driver** (~1,900 lines)
 
-Total: ~4,500 lines of new code across 17 files.
+`driver/greenboost_win.c` -- KMDF kernel driver. Allocates pinned 2MB contiguous blocks, maps into userspace via MDL, monitors RAM/pagefile pressure, manages LRU buffer lifecycle with three-tier eviction.
+
+`driver/greenboost_win.h` -- Device state structs, system information types for memory queries.
+
+`driver/greenboost_ioctl_win.h` -- Windows IOCTL definitions (CTL_CODE). Shared between driver and shim.
+
+`driver/greenboost_win.inf` -- KMDF driver installation manifest.
+
+**CUDA Shim** (~1,450 lines)
+
+`shim/greenboost_cuda_shim_win.c` -- DLL that hooks cudaMalloc/cudaFree via Microsoft Detours. Routes large allocations through CUDA UVM (primary) or driver-mapped pinned pages (fallback). Spoofs VRAM reporting so inference engines see extended memory.
+
+`shim/greenboost_cuda_shim_win.h` -- Fibonacci hash table, config struct, CUDA type stubs, UVM prefetch typedefs.
+
+**Tests** (~530 lines)
+
+`tests/test_ioctl.c` -- 7-test driver interface validation (alloc, free, info, madvise, evict, pin, pressure event).
+
+`tests/test_uvm.c` -- 6-test UVM allocation path validation (interception, memset, free, multi-alloc, VRAM spoofing).
+
+**Tools** (~1,150 lines)
+
+`tools/build.ps1` -- Automated VS2022 + WDK + vcpkg build.
+`tools/install.ps1` -- Hardware detection, registry config, driver install.
+`tools/sign.ps1` -- Test-signing automation.
+`tools/config.ps1` -- Registry configuration utility.
+`tools/diagnose.ps1` -- Health check script.
+
+**Build System** (~200 lines)
+
+Three `CMakeLists.txt` files with auto WDK/KMDF version detection, vcpkg Detours discovery, and conditional driver/shim/test targets.
+
+**Docs** (~815 lines)
+
+`BUILDING.md` -- Full build instructions for VS2022 + WDK + vcpkg.
+`TROUBLESHOOTING.md` -- Common build and runtime issues.
+
+---
+
+## Memory strategy
+
+The shim uses a two-tier allocation strategy for intercepted CUDA allocations (default threshold: >= 256MB):
+
+**Primary: CUDA Unified Virtual Memory (UVM)**
+When available (CUDA 6.0+, compute capability >= 3.0), the shim allocates via `cuMemAllocManaged` and immediately prefetches pages to the GPU with `cuMemPrefetchAsync`. The NVIDIA driver transparently migrates pages between VRAM and system RAM based on access patterns. Weights that fit in physical VRAM are accessed at full HBM bandwidth (~1 TB/s on RTX 4090). Overflow pages spill to RAM and are accessed over PCIe.
+
+**Fallback: Driver-mapped pinned pages**
+On older GPUs or if UVM is unavailable, the shim falls back to the kernel driver path: `IOCTL_ALLOC` allocates pinned DDR4 pages, maps them into userspace via MDL, and registers them with CUDA via `cuMemHostRegister(DEVICEMAP)`. This path works universally but all GPU access traverses PCIe (~32 GB/s on Gen4 x16).
+
+UVM capability is probed lazily on the first intercepted allocation (not at DLL load, where no CUDA context exists yet). The fallback path is always available as a safety net.
 
 ---
 
@@ -58,34 +95,44 @@ The full architecture mapping is documented in `windows-port/CC_INSTRUCTIONS.md`
 
 **Sharing memory with userspace:** This was the trickiest part and where the first implementation had a critical bug. The original attempt used `ZwCreateSection` to create an NT section object, but `ZwCreateSection` with a NULL file handle creates anonymous pagefile-backed memory -- completely separate from the pinned physical pages we allocated. The shim would have gotten the wrong memory entirely. The fix uses `MmMapLockedPagesSpecifyCache(UserMode)` which maps the actual physical pages described by the MDL directly into the calling process. This is the true Windows equivalent of Linux `mmap(dma_buf_fd)`.
 
+**GPU memory path:** Linux relies on DMA-BUF + HMM for transparent page migration between VRAM and RAM. Windows has no kernel-level equivalent, so the shim uses CUDA Unified Virtual Memory (UVM) to let the NVIDIA driver handle page migration. This is the closest Windows equivalent and delivers near-native VRAM bandwidth for hot pages.
+
 **Buffer lifecycle:** Linux relies on `close(fd)` triggering the DMA-BUF release callback for automatic cleanup. Windows has no equivalent for MDL user mappings, so we added an explicit `GB_IOCTL_FREE` that the shim calls on `cudaFree`. The driver tracks the owning process so it can do cross-process cleanup via `KeStackAttachProcess` if needed during driver unload.
 
 **CUDA hook injection:** Linux uses `LD_PRELOAD` + a `dlsym` intercept (because Ollama resolves symbols via `dlopen` internally). Windows uses Microsoft Detours (MIT licensed) for API hooking, with an IAT patching fallback.
 
 **Hash table bug fix:** The original Linux `ht_remove` zeroes deleted slots with `memset(e, 0, sizeof(*e))`, which breaks open-addressing probe chains. A lookup for a key that hashed past the deleted slot would stop early at the zeroed slot and miss the target. The Windows port uses tombstone markers instead, which preserves probe chain integrity. This is a bug in the upstream Linux code too.
 
-**Watchdog:** Linux `kthread` becomes `PsCreateSystemThread`. Linux `eventfd` becomes a named kernel event. Memory pressure queries use `ZwQuerySystemInformation` instead of `/proc/meminfo`.
+**Registry reading:** Uses `ZwOpenKey`/`ZwQueryValueKey` with absolute registry path (`Services\GreenBoost\Parameters`) instead of WDF registry helpers, for reliability at early driver init before the framework is fully set up.
+
+**Memory queries:** `MmAvailablePages` (an exported kernel variable not reliably available across WDK versions) replaced with `ZwQuerySystemInformation(SystemPerformanceInformation)`.
+
+**Watchdog:** Linux `kthread` becomes `PsCreateSystemThread`. Linux `eventfd` becomes a named kernel event (`\BaseNamedObjects\GreenBoostPressure`). Memory pressure queries use `ZwQuerySystemInformation` instead of `/proc/meminfo`.
 
 ---
 
 ## Status
 
-**Work in progress.** The code is structurally complete and has been reviewed, but hasn't been compiled against WDK or tested on real hardware yet. It needs:
+**Built and community-tested.** The driver and shim have been compiled on Win11 + VS2022 + WDK and tested with dynamic injection into Python processes (ComfyUI). Build automation scripts are included. The UVM allocation path is implemented and the test suite passes.
 
-- A build with Visual Studio 2022 + WDK to shake out any compile errors
-- Test signing enabled and a test load on a real Windows machine
-- Actual end-to-end testing with LM Studio loading a model larger than physical VRAM
-- Driver Verifier pass to catch any kernel memory handling issues
+Known limitations:
+- Inference speed with the driver fallback path (non-UVM) is significantly slower due to PCIe bandwidth constraints. UVM path recommended for all modern GPUs.
+- Test signing required for driver installation (standard for development).
+- Not yet tested with Driver Verifier for production hardening.
 
-If you know Windows kernel driver development and want to help get this across the finish line, PRs are very welcome.
+Contributions welcome. See open issues for areas that could use help.
 
 ---
 
 ## Building
 
-Prerequisites: Visual Studio 2022, Windows Driver Kit (WDK), CMake 3.20+, Microsoft Detours (NuGet).
+Prerequisites: Visual Studio 2022, Windows Driver Kit (WDK), CMake 3.20+, vcpkg with Microsoft Detours.
 
-See `windows-port/BUILDING.md` for full instructions.
+See `windows-port/BUILDING.md` for full instructions, or use the automated build script:
+
+```powershell
+.\windows-port\build.ps1
+```
 
 ---
 
