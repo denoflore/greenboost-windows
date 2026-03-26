@@ -50,6 +50,7 @@ static pfn_cudaMallocManaged    real_cudaMallocManaged   = NULL;
 static pfn_cudaMemGetInfo       real_cudaMemGetInfo      = NULL;
 static pfn_cuMemAlloc_v2        real_cuMemAlloc_v2       = NULL;
 static pfn_cuMemFree_v2         real_cuMemFree_v2        = NULL;
+static pfn_cuMemAllocManaged    real_cuMemAllocManaged_drv = NULL;
 static pfn_cuMemAllocAsync      real_cuMemAllocAsync     = NULL;
 static pfn_cuMemFreeAsync       real_cuMemFreeAsync      = NULL;
 static pfn_cuMemGetInfo         real_cuMemGetInfo        = NULL;
@@ -435,11 +436,71 @@ static int gb_free_buffer(CUdeviceptr ptr)
 }
 
 /* ================================================================== */
+/*  Deferred UVM probe                                                  */
+/*                                                                      */
+/*  MUST NOT run at DLL_PROCESS_ATTACH (gb_shim_init) — no CUDA         */
+/*  context exists yet, so cuMemAllocManaged would fail with            */
+/*  CUDA_ERROR_NOT_INITIALIZED, permanently disabling UVM fallback      */
+/*  even on capable hardware.                                           */
+/*                                                                      */
+/*  Instead, probe once on the first intercepted allocation, where      */
+/*  the calling application has already created a CUDA context.         */
+/* ================================================================== */
+
+static void gb_probe_uvm_once(void)
+{
+    CUdeviceptr probe_ptr = 0;
+    CUresult ret;
+    pfn_cuMemFree_v2 free_fn;
+
+    /* Double-checked locking via Initialized gate + UvmProbed flag */
+    if (gb_config.UvmProbed)
+        return;
+
+    /* Serialize concurrent first-call races */
+    EnterCriticalSection(&ht_locks[0]);
+    if (gb_config.UvmProbed) {
+        LeaveCriticalSection(&ht_locks[0]);
+        return;
+    }
+
+    gb_config.UvmAvailable = FALSE;
+
+    if (!real_cuMemAllocManaged_drv) {
+        gb_log("UVM probe: cuMemAllocManaged not found — UVM unavailable");
+        gb_config.UvmProbed = TRUE;
+        LeaveCriticalSection(&ht_locks[0]);
+        return;
+    }
+
+    /* Tiny probe allocation — 4 bytes, just to test capability */
+    ret = real_cuMemAllocManaged_drv(&probe_ptr, 4, CU_MEM_ATTACH_GLOBAL);
+    if (ret == CUDA_SUCCESS) {
+        gb_config.UvmAvailable = TRUE;
+        gb_log("UVM probe: managed memory available (probe alloc succeeded)");
+
+        /* Clean up the probe allocation */
+        free_fn = real_cuMemFree_v2;
+        if (free_fn)
+            free_fn(probe_ptr);
+    } else {
+        gb_log("UVM probe: cuMemAllocManaged returned %d — UVM unavailable", ret);
+    }
+
+    gb_config.UvmProbed = TRUE;
+    LeaveCriticalSection(&ht_locks[0]);
+}
+
+/* ================================================================== */
 /*  CUDA hook implementations                                           */
 /* ================================================================== */
 
 static cudaError_t CUDAAPI hooked_cudaMalloc(void **devPtr, size_t size)
 {
+    /* Deferred UVM probe — runs once on first interception */
+    if (!gb_config.UvmProbed)
+        gb_probe_uvm_once();
+
     /* Only intercept allocations above threshold */
     if (size >= gb_config.ThresholdBytes && gb_config.Initialized) {
         CUresult ret = gb_alloc_from_driver(devPtr, size);
@@ -471,6 +532,10 @@ static cudaError_t CUDAAPI hooked_cudaMallocAsync(
 
 static CUresult CUDAAPI hooked_cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
 {
+    /* Deferred UVM probe — runs once on first interception */
+    if (!gb_config.UvmProbed)
+        gb_probe_uvm_once();
+
     if (bytesize >= gb_config.ThresholdBytes && gb_config.Initialized) {
         void *ptr;
         CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
@@ -693,6 +758,8 @@ static void gb_resolve_symbols(void)
         GetProcAddress(hCudaDrv, "cuMemGetInfo_v2");
     real_cuDeviceTotalMem_v2 = (pfn_cuDeviceTotalMem_v2)
         GetProcAddress(hCudaDrv, "cuDeviceTotalMem_v2");
+    real_cuMemAllocManaged_drv = (pfn_cuMemAllocManaged)
+        GetProcAddress(hCudaDrv, "cuMemAllocManaged");
     real_cuMemHostRegister = (pfn_cuMemHostRegister)
         GetProcAddress(hCudaDrv, "cuMemHostRegister_v2");
     real_cuMemHostUnregister = (pfn_cuMemHostUnregister)
@@ -731,9 +798,10 @@ static void gb_resolve_symbols(void)
         }
     }
 
-    gb_log("symbols resolved: cuMemAlloc=%p cudaMalloc=%p cuMemHostRegister=%p",
+    gb_log("symbols resolved: cuMemAlloc=%p cudaMalloc=%p cuMemHostRegister=%p "
+           "cuMemAllocManaged=%p",
            (void*)real_cuMemAlloc_v2, (void*)real_cudaMalloc,
-           (void*)real_cuMemHostRegister);
+           (void*)real_cuMemHostRegister, (void*)real_cuMemAllocManaged_drv);
 }
 
 /* ================================================================== */
