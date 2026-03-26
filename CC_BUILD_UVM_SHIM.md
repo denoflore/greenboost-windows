@@ -1,13 +1,14 @@
-# CC BUILD INSTRUCTIONS: GreenBoost UVM Shim Migration
-## Replace cuMemHostRegister with CUDA Unified Virtual Memory for GPU-local bandwidth
-## Generated: 2026-03-26 | /fiwb chain
+# CC BUILD INSTRUCTIONS: GreenBoost UVM Allocation Path
+## Wire UvmAvailable into the actual allocation/free/prefetch paths
+## Generated: 2026-03-26 | /fiwb Phase 2
 ## Repo: denoflore/GreenBoost-Windows | Branch: main
+## Predecessor: Merge #6 (deferred UVM probe) -- UvmProbed/UvmAvailable flags exist but are unused
 
 ---
 
 ## EXECUTION PATTERN
 
-1. Read `.nsca/repo_profile.md` for repo orientation (generate it first if missing)
+1. Read `.nsca/repo_profile.md` for repo orientation
 2. Read a section of this spec, build it, run the smoke test
 3. Smoke test MUST PASS before continuing
 4. Read this spec AGAIN to find next section
@@ -20,97 +21,89 @@
 
 ### What This Repo IS
 
-GreenBoost is a three-tier GPU memory expansion system (VRAM > DDR4 RAM > NVMe pagefile) that makes AI inference engines believe they have more VRAM than physically exists. It consists of a Linux kernel module (the original, production-quality), a Windows KMDF driver port, a CUDA interception shim DLL, and framework-specific patches (ExLlamaV3). The shim is the critical bridge -- it hooks every CUDA allocation call via Microsoft Detours, intercepts large allocations, and routes them through the driver's pinned DDR4 pages instead of GPU VRAM.
+GreenBoost is a three-tier GPU memory expansion system. A KMDF kernel driver manages DDR4 RAM pages. A CUDA shim DLL (Detours-based) intercepts `cudaMalloc` calls and routes large allocations through the driver or UVM. After Merge #6, the shim probes UVM capability on first interception and sets `gb_config.UvmAvailable`, but then ignores it -- every allocation still goes through the slow driver+cuMemHostRegister path (PCIe-bound, ~31x bandwidth penalty vs VRAM).
 
-### What Success Looks Like
-
-The shim intercepts `cudaMalloc` for large allocations (default >= 256MB), allocates via CUDA Unified Virtual Memory (`cuMemAllocManaged`), prefetches pages to the GPU, and returns a unified pointer. The NVIDIA driver transparently migrates pages between VRAM and RAM based on access patterns. Inference frameworks (ComfyUI, ExLlama, etc.) see expanded VRAM and run at near-native speed for weights that fit in physical VRAM, with graceful degradation to PCIe bandwidth only for overflow. The driver continues to monitor RAM pressure, the shim continues to spoof VRAM sizes, and the fallback path (driver MDL + cuMemHostRegister) still works for GPUs without UVM support.
+This build wires UvmAvailable into the actual allocation, free, and prefetch paths.
 
 ### Protected Zones (DO NOT MODIFY OR DELETE)
 
-- `greenboost.c`, `greenboost.h`, `greenboost_ioctl.h` -- Linux kernel module source. Do not touch.
-- `greenboost.ko`, `greenboost.o`, `greenboost.mod.*` -- Compiled Linux kernel objects. Do not touch.
-- `Makefile`, `Kbuild` -- Linux build system. Do not touch.
-- `tools/` -- Linux userspace tools. Do not touch.
-- `patches/` -- Framework integration patches (Linux-specific). Do not touch.
-- `windows-port/driver/` -- The KMDF driver. This build does NOT modify any driver code.
-- `windows-port/tests/test_ioctl.c` -- Existing tests. Do not break. May extend.
-- `windows-port/tools/` -- Build/install scripts from PR #4. Do not touch.
-- `.nsca/` -- Repo profile. Only regenerate via script.
+- Everything outside `windows-port/shim/` and `windows-port/tests/` -- do not touch
+- `windows-port/driver/` -- no driver changes
+- `gb_alloc_from_driver()` -- do NOT modify or delete this function. It is the fallback path.
+- `gb_probe_uvm_once()` -- do NOT modify. Already correct from Merge #6.
+- `gb_shim_init()` / `gb_shim_cleanup()` init flow -- do NOT add CUDA API calls to init. The cleanup loop WILL be modified.
 
 ### Active Build Zone
 
-This build modifies:
-- `windows-port/shim/greenboost_cuda_shim_win.h` -- Add new CUDA typedefs and a UVM mode flag
-- `windows-port/shim/greenboost_cuda_shim_win.c` -- Core changes: new UVM alloc path, updated free path, symbol resolution, prefetch worker, init/cleanup
+Modifies:
+- `windows-port/shim/greenboost_cuda_shim_win.h` -- add typedefs for cuMemPrefetchAsync, cuCtxGetDevice; add GpuDevice and UvmAllocatedBytes to config
+- `windows-port/shim/greenboost_cuda_shim_win.c` -- add gb_alloc_uvm(), modify hooked_cudaMalloc/cuMemAlloc_v2/async variants, fix gb_free_buffer(), fix cleanup loop, extend prefetch worker, resolve new symbols
 
-This build creates:
-- `windows-port/tests/test_uvm.c` -- Standalone UVM allocation test
+Creates:
+- `windows-port/tests/test_uvm.c` -- standalone UVM validation test
 
 ### How This Build Connects
 
-The shim DLL is loaded into a CUDA process via Detours (`withdll.exe /d:greenboost_cuda.dll app.exe`). It intercepts `cudaMalloc`, `cuMemAlloc_v2`, `cudaFree`, `cuMemFree_v2`, and their async variants, plus memory info queries (`cudaMemGetInfo`, NVML). The driver provides configuration (registry), RAM pressure monitoring (named event), and buffer management (IOCTLs). After this build, the shim's hot path bypasses the driver for memory allocation (using UVM instead) but still uses the driver for configuration, pressure signaling, and VRAM info spoofing context.
+The shim hooks CUDA alloc/free calls via Detours. After this build: large allocs go through `gb_alloc_uvm()` (UVM + prefetch) when available, falling back to `gb_alloc_from_driver()` (driver IOCTL + cuMemHostRegister) when not. Free path branches on hash table `is_managed` field. Prefetch worker supports both CUDA device prefetch and Win32 RAM prefetch.
 
 ---
 
 ## REQUIRED READING
 
-Before writing any code, read these files IN ORDER:
+Read these files BEFORE writing any code:
 
-1. `windows-port/shim/greenboost_cuda_shim_win.h` -- All typedefs, hash table structure, config struct. Note: `is_managed` field already exists in hash table entries. `pfn_cuMemAllocManaged` typedef already exists.
-2. `windows-port/shim/greenboost_cuda_shim_win.c` -- The entire file (1031 lines). Pay close attention to:
-   - `gb_alloc_from_driver()` (line ~326) -- THIS IS THE FUNCTION BEING REPLACED
-   - `gb_free_buffer()` (line ~413) -- Free path needs branching on `is_managed`
-   - `gb_resolve_symbols()` (line ~661) -- Where CUDA symbols are loaded
-   - `gb_shim_init()` (line ~906) -- Init validation and UVM capability check goes here
-   - `gb_shim_cleanup()` (line ~960) -- Leak cleanup needs UVM awareness
-   - `prefetch_worker()` (line ~92) -- Will be extended for CUDA prefetch
-3. `windows-port/driver/greenboost_ioctl_win.h` -- IOCTL interface structures (unchanged, but need to understand for fallback path)
+1. `windows-port/shim/greenboost_cuda_shim_win.h` -- 169 lines. Note existing: `pfn_cuMemAllocManaged` typedef (line ~73), `is_managed` field in `gb_ht_entry_t` (line ~108), `UvmProbed`/`UvmAvailable` in config (lines 141-142).
+2. `windows-port/shim/greenboost_cuda_shim_win.c` -- 1099 lines. Note existing:
+   - `real_cuMemAllocManaged_drv` (line 53) -- resolved, used by probe only
+   - `gb_alloc_from_driver()` (line 327) -- THE FALLBACK, do not modify
+   - `gb_free_buffer()` (line 414) -- MUST be modified (currently ignores `is_managed`)
+   - `gb_probe_uvm_once()` (line 450) -- DO NOT modify
+   - `hooked_cudaMalloc` (line 498) -- probe exists, needs UVM alloc path added
+   - `hooked_cuMemAlloc_v2` (line 533) -- same
+   - `hooked_cudaMallocAsync` (line 522) -- needs probe + UVM path
+   - `hooked_cuMemAllocAsync` (line 557) -- needs probe + UVM path
+   - `prefetch_req_t` (line 77) -- only has ptr+size, needs is_managed+to_device
+   - `enqueue_prefetch` (line 124) -- only takes ptr+size, needs extending
+   - Cleanup loop (line 1046) -- unconditionally calls cuMemHostUnregister, needs is_managed branch
+3. `windows-port/driver/greenboost_ioctl_win.h` -- unchanged, read for IOCTL structure context
 
 ---
 
 ## CRITICAL ARCHITECTURE DECISIONS
 
-### Decision 1: UVM-first with driver fallback
+### Decision: UVM-first, driver-fallback, in every hook
 
-The shim tries `cuMemAllocManaged` first. If it succeeds, the allocation is tracked as `is_managed=1` with `gb_buf_id=0` (no driver buffer). If UVM fails (old GPU, driver issue, out of address space), fall back to the existing driver IOCTL + cuMemHostRegister path.
+Every allocation hook follows this pattern:
+```
+if (above_threshold && initialized) {
+    if (!UvmProbed) gb_probe_uvm_once();
+    if (UvmAvailable) { try gb_alloc_uvm(); if success return; }
+    try gb_alloc_from_driver(); if success return;
+    log("both paths failed, falling through");
+}
+return real_cuda_function(...);
+```
 
-**Do NOT** remove the driver allocation path. It must remain functional as a fallback.
+### Anti-Patterns -- READ THESE CAREFULLY
 
-### Decision 2: Synchronous prefetch on alloc, async prefetch worker for background
-
-When a UVM allocation succeeds, immediately call `cuMemPrefetchAsync(ptr, size, device, NULL)` with the NULL stream. This is synchronous-ish -- it queues the prefetch and returns, but using the default stream means subsequent CUDA work will wait for it. For weight loading this is correct: weights must be resident before inference starts.
-
-The existing prefetch worker thread is repurposed: instead of `PrefetchVirtualMemory` (RAM-only), it calls `cuMemPrefetchAsync` for UVM allocations. This handles background promotion/demotion when pressure events fire.
-
-### Decision 3: No driver accounting for UVM allocations
-
-UVM allocations bypass the driver entirely. The driver's `PoolAllocated` counter and `ActiveBufs` count will not reflect UVM allocations. This is acceptable because:
-- VRAM spoofing uses `ReportedTotalVram` from config, not allocation counters
-- GET_INFO accuracy is nice-to-have but not critical
-- Adding a new IOCTL for UVM accounting would complicate the driver for no functional benefit
-
-The shim maintains its own `uvm_allocated_bytes` counter for logging.
-
-### Anti-Patterns
-
-- **Do NOT hook `cudaMallocManaged` or `cuMemAllocManaged`.** These are the REAL functions we're calling. Hooking them would cause infinite recursion.
-- **Do NOT call `cuMemHostUnregister` on UVM pointers.** UVM pointers were never host-registered. Check `is_managed` before unregistering.
-- **Do NOT call `gb_free_driver_buf` for UVM allocations.** There is no driver buffer. Check `is_managed` and `gb_buf_id`.
-- **Do NOT remove `real_cuMemHostRegister` from symbol resolution.** It's still needed for the fallback path.
-- **Do NOT change any function signatures or IOCTL structures.** This build only changes internal implementation of existing functions.
+- **Do NOT hook `cuMemAllocManaged`.** It is the REAL function `gb_alloc_uvm` calls. Hooking it = infinite recursion = stack overflow = crash.
+- **Do NOT call `cuMemHostUnregister` on UVM pointers.** UVM pointers were never host-registered. Check `is_managed` FIRST.
+- **Do NOT call `gb_free_driver_buf` for UVM allocations.** There is no driver buffer (buf_id=0). Check `is_managed` FIRST.
+- **Do NOT modify `gb_alloc_from_driver()`.** It is the working fallback and must remain unchanged.
+- **Do NOT modify `gb_probe_uvm_once()`.** It is correct as merged.
+- **Do NOT add CUDA API calls to `gb_shim_init()`.** No CUDA context exists at DLL_PROCESS_ATTACH.
 
 ---
 
-## Phase 1: Header Updates
+## Phase 1: Header Additions
 
-**Goal:** Add new CUDA API typedefs and UVM state to the header.
+**Goal:** Add missing typedefs and config fields.
 
 **File:** `windows-port/shim/greenboost_cuda_shim_win.h`
 
-### Changes:
+### 1a: Add new function pointer typedefs
 
-1. Add new function pointer typedefs after the existing `pfn_cuMemHostGetDevicePointer` line:
+After the existing `pfn_cuMemHostGetDevicePointer` typedef (around line 84), add:
 
 ```c
 /* UVM prefetch and device query */
@@ -118,189 +111,89 @@ typedef CUresult    (*pfn_cuMemPrefetchAsync)(CUdeviceptr, size_t, CUdevice, CUs
 typedef CUresult    (*pfn_cuCtxGetDevice)(CUdevice *);
 ```
 
-Note: `pfn_cuMemAllocManaged` (driver API, takes CUdeviceptr*) ALREADY exists in the header -- do NOT add a duplicate. The runtime version `pfn_cudaMallocManaged` (takes void**) also exists. We only need `pfn_cuMemPrefetchAsync` and `pfn_cuCtxGetDevice` which are new. The driver API variable will be `real_cuMemAllocManaged` (not to be confused with `real_cudaMallocManaged` which is the runtime version).
+### 1b: Add config fields
 
-2. Add a UVM mode flag and counter to `gb_shim_config_t`:
+After `UvmAvailable` (line 142), add:
 
 ```c
-    /* UVM state */
-    BOOL    UvmAvailable;      /* cuMemAllocManaged resolved and working */
-    BOOL    UvmProbed;         /* FALSE until first alloc probes UVM capability */
-    CUdevice GpuDevice;        /* GPU device ordinal for prefetch target */
-    volatile LONG64 UvmAllocatedBytes;  /* shim-side UVM accounting */
+    CUdevice GpuDevice;                /* GPU ordinal for prefetch target  */
+    volatile LONG64 UvmAllocatedBytes; /* shim-side UVM accounting         */
 ```
-
-Add these after the existing `BOOL Initialized;` field.
 
 ### SMOKE TEST:
-
 ```
-Compile the header standalone:
-  cl /c /D_USERMODE /I"windows-port/driver" windows-port/shim/greenboost_cuda_shim_win.h
-Must produce zero errors. (If cl not available, visual inspection: no syntax errors, all types resolve.)
+Header compiles cleanly with no new warnings. All existing types resolve.
 ```
 
 After completing Phase 1, read this document again.
 
 ---
 
-## Phase 2: Symbol Resolution and Init
+## Phase 2: Symbol Resolution
 
-**Goal:** Resolve new CUDA symbols and detect UVM capability at startup.
+**Goal:** Resolve cuMemPrefetchAsync and cuCtxGetDevice from nvcuda.dll.
 
 **File:** `windows-port/shim/greenboost_cuda_shim_win.c`
 
-### 2a: Add new static function pointers
+### 2a: Add static function pointers
 
-After the existing `static pfn_cuMemHostGetDevicePointer real_cuMemHostGetDevicePointer = NULL;` line (around line 58), add:
+After `real_cuMemAllocManaged_drv` (line 53), add:
 
 ```c
 static pfn_cuMemPrefetchAsync     real_cuMemPrefetchAsync    = NULL;
 static pfn_cuCtxGetDevice         real_cuCtxGetDevice         = NULL;
-static pfn_cuMemAllocManaged  real_cuMemAllocManaged  = NULL;
 ```
 
-### 2b: Resolve new symbols in `gb_resolve_symbols()`
+### 2b: Resolve in `gb_resolve_symbols()`
 
-After the line that resolves `cuMemHostGetDevicePointer_v2` (around line 701), add:
+After the line `real_cuMemAllocManaged_drv = ... GetProcAddress(hCudaDrv, "cuMemAllocManaged");` (around line 761-762), add:
 
 ```c
-    /* UVM and prefetch symbols */
-    real_cuMemAllocManaged = (pfn_cuMemAllocManaged)
-        GetProcAddress(hCudaDrv, "cuMemAllocManaged");
     real_cuMemPrefetchAsync = (pfn_cuMemPrefetchAsync)
         GetProcAddress(hCudaDrv, "cuMemPrefetchAsync");
     real_cuCtxGetDevice = (pfn_cuCtxGetDevice)
         GetProcAddress(hCudaDrv, "cuCtxGetDevice");
 ```
 
-After the log line "symbols resolved: cuMemAlloc=%p cudaMalloc=%p cuMemHostRegister=%p", add:
+### 2c: Update the log line
+
+The log line at ~804 currently shows cuMemAllocManaged. Extend it:
 
 ```c
-    gb_log("UVM symbols: cuMemAllocManaged=%p cuMemPrefetchAsync=%p cuCtxGetDevice=%p",
-           (void*)real_cuMemAllocManaged, (void*)real_cuMemPrefetchAsync,
-           (void*)real_cuCtxGetDevice);
+    gb_log("symbols resolved: cuMemAlloc=%p cudaMalloc=%p cuMemHostRegister=%p "
+           "cuMemAllocManaged=%p cuMemPrefetchAsync=%p",
+           (void*)real_cuMemAlloc_v2, (void*)real_cudaMalloc,
+           (void*)real_cuMemHostRegister, (void*)real_cuMemAllocManaged_drv,
+           (void*)real_cuMemPrefetchAsync);
 ```
 
-### 2c: UVM capability detection -- DEFERRED to first allocation
+### 2d: Initialize new config fields
 
-**CRITICAL: Do NOT call any CUDA functions during gb_shim_init().**
+In `gb_shim_init()`, right after the existing `gb_config.UvmAvailable = FALSE;` init (which is inside the struct zero-init or wherever CC put it -- if it's not explicit, add it near the existing UvmProbed init):
 
-`gb_shim_init()` runs at `DLL_PROCESS_ATTACH` time, BEFORE the application has called `cuInit()` or created a CUDA context. Any CUDA API call (including `cuMemAllocManaged`) will fail with `CUDA_ERROR_NOT_INITIALIZED`. The existing shim correctly avoids CUDA calls at init -- it only resolves function pointers via GetProcAddress.
-
-The UVM probe must be deferred to the first intercepted allocation, when a CUDA context is guaranteed to exist.
-
-**In `gb_shim_init()`, replace the validation block:**
 ```c
-    /* Validate we have the minimum required symbols */
-    if (!real_cuMemHostRegister || !real_cuMemHostGetDevicePointer) {
-        gb_log_err("critical CUDA symbols not found -- shim disabled");
-        gb_config.Initialized = FALSE;
-        return;
-    }
-```
-
-**With:**
-```c
-    /* Initialize UVM state -- actual probe deferred to first allocation */
-    gb_config.UvmAvailable = FALSE;
-    gb_config.UvmProbed = FALSE;
     gb_config.GpuDevice = 0;
     gb_config.UvmAllocatedBytes = 0;
-
-    if (real_cuMemAllocManaged && real_cuMemPrefetchAsync) {
-        gb_log("UVM symbols resolved -- will probe on first allocation");
-    } else {
-        gb_log("UVM symbols not found -- will use driver+HostRegister path");
-    }
-
-    /* Validate fallback path is available */
-    if (!real_cuMemAllocManaged && !real_cuMemHostRegister) {
-        gb_log_err("neither UVM nor HostRegister symbols found -- shim disabled");
-        gb_config.Initialized = FALSE;
-        return;
-    }
-```
-
-**Add a new `UvmProbed` field to `gb_shim_config_t` in the header** (Phase 1), right after `UvmAvailable`:
-```c
-    BOOL    UvmProbed;         /* FALSE until first alloc probes UVM */
-```
-
-**Add the lazy probe function** as a new static function in the .c file, before `gb_alloc_uvm()`:
-
-```c
-/*
- * Probe UVM capability on first intercepted allocation.
- * Called exactly once, when the CUDA context is known to exist.
- * Thread-safe via InterlockedCompareExchange on UvmProbed.
- */
-static void gb_probe_uvm_once(void)
-{
-    /* Atomic check-and-set: only one thread probes */
-    if (InterlockedCompareExchange((volatile LONG*)&gb_config.UvmProbed, TRUE, FALSE))
-        return;  /* Already probed by another thread */
-
-    if (!real_cuMemAllocManaged || !real_cuMemPrefetchAsync) {
-        gb_log("UVM probe: symbols not available");
-        return;
-    }
-
-    /* Get current GPU device */
-    if (real_cuCtxGetDevice) {
-        CUresult devRet = real_cuCtxGetDevice(&gb_config.GpuDevice);
-        if (devRet != CUDA_SUCCESS) {
-            gb_log("cuCtxGetDevice failed (%d), defaulting to device 0", devRet);
-            gb_config.GpuDevice = 0;
-        }
-    }
-
-    /* Probe: try a small UVM allocation */
-    {
-        CUdeviceptr testPtr = 0;
-        CUresult uvmRet = real_cuMemAllocManaged(&testPtr, 4096,
-                                                  CU_MEM_ATTACH_GLOBAL);
-        if (uvmRet == CUDA_SUCCESS && testPtr) {
-            real_cuMemFree_v2(testPtr);
-            gb_config.UvmAvailable = TRUE;
-            gb_log("UVM probe SUCCESS -- managed memory active (device %d)",
-                   gb_config.GpuDevice);
-        } else {
-            gb_log("UVM probe FAILED (%d) -- using driver+HostRegister fallback",
-                   uvmRet);
-        }
-    }
-}
 ```
 
 ### SMOKE TEST:
-
 ```
-Build the shim DLL. On load (DLL_PROCESS_ATTACH), check stderr:
-  "[GreenBoost] UVM symbols resolved -- will probe on first allocation"
-  (NO CUDA calls at this point -- just symbol resolution)
-
-Then on first cudaMalloc above threshold:
-  "[GreenBoost] UVM probe SUCCESS -- managed memory active (device 0)"
-  or
-  "[GreenBoost] UVM probe FAILED (...) -- using driver+HostRegister fallback"
-
-The probe must NOT happen at DLL load time. It must happen at first interception.
+Build. On load, log shows cuMemPrefetchAsync address (non-NULL on CUDA 8.0+).
 ```
 
 After completing Phase 2, read this document again.
 
 ---
 
-## Phase 3: UVM Allocation Path
+## Phase 3: UVM Allocation Function
 
-**Goal:** Replace the core allocation function with UVM-first, driver-fallback logic.
+**Goal:** Create `gb_alloc_uvm()` that allocates via UVM and prefetches to GPU.
 
 **File:** `windows-port/shim/greenboost_cuda_shim_win.c`
 
-### 3a: New UVM allocation function
+### Add this function BETWEEN `gb_probe_uvm_once()` and `hooked_cudaMalloc`
 
-Add this NEW function BEFORE `gb_alloc_from_driver()`:
+Insert at line ~492 (after the closing brace of `gb_probe_uvm_once`, before the CUDA hook implementations comment block):
 
 ```c
 /*
@@ -313,32 +206,38 @@ static CUresult gb_alloc_uvm(void **devPtr, size_t size)
     CUdeviceptr dptr = 0;
     CUresult ret;
 
-    ret = real_cuMemAllocManaged(&dptr, size, CU_MEM_ATTACH_GLOBAL);
+    /* Get GPU device ordinal if not yet known */
+    if (gb_config.GpuDevice == 0 && real_cuCtxGetDevice) {
+        CUdevice dev = 0;
+        if (real_cuCtxGetDevice(&dev) == CUDA_SUCCESS)
+            gb_config.GpuDevice = dev;
+    }
+
+    ret = real_cuMemAllocManaged_drv(&dptr, size, CU_MEM_ATTACH_GLOBAL);
     if (ret != CUDA_SUCCESS) {
         gb_log("cuMemAllocManaged failed: %d for %zuMB", ret, size >> 20);
         return ret;
     }
 
-    /* Prefetch to GPU immediately -- bring pages into VRAM proactively */
+    /* Prefetch to GPU -- bring pages into VRAM proactively.
+     * Uses NULL stream (default): subsequent CUDA work on this stream
+     * will wait for prefetch to complete. Correct for weight loading. */
     if (real_cuMemPrefetchAsync) {
         CUresult pfRet = real_cuMemPrefetchAsync(dptr, size,
-                                                   gb_config.GpuDevice, NULL);
-        if (pfRet != CUDA_SUCCESS) {
+                                                  gb_config.GpuDevice, NULL);
+        if (pfRet != CUDA_SUCCESS)
             gb_log("cuMemPrefetchAsync hint failed: %d (non-fatal)", pfRet);
-            /* Non-fatal: UVM will page-fault on first access instead */
-        }
     }
 
     *devPtr = (void *)(uintptr_t)dptr;
 
-    /* Track in hash table: is_managed=1, buf_id=0, mapped_ptr=NULL */
+    /* Track: is_managed=1, buf_id=0, mapped_ptr=NULL (no driver buffer) */
     if (!ht_insert(dptr, size, 1, 0, NULL)) {
         gb_log_err("hash table full -- freeing UVM allocation");
         real_cuMemFree_v2(dptr);
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
 
-    /* Update shim-side accounting */
     InterlockedAdd64(&gb_config.UvmAllocatedBytes, (LONG64)size);
 
     gb_log("UVM alloc: %zuMB -> ptr %p (prefetched to device %d)",
@@ -348,25 +247,41 @@ static CUresult gb_alloc_uvm(void **devPtr, size_t size)
 }
 ```
 
-### 3b: Modify `hooked_cudaMalloc` to try UVM first
+### SMOKE TEST:
+```
+Compiles. Function signature matches how it will be called in Phase 4.
+gb_alloc_uvm takes (void**, size_t), returns CUresult. Consistent with gb_alloc_from_driver.
+```
 
-Replace the body of `hooked_cudaMalloc`:
+After completing Phase 3, read this document again.
+
+---
+
+## Phase 4: Wire UVM Into Allocation Hooks
+
+**Goal:** Modify all four allocation hooks to try UVM before driver fallback.
+
+**File:** `windows-port/shim/greenboost_cuda_shim_win.c`
+
+### 4a: Replace `hooked_cudaMalloc` body
+
+Current code (lines ~498-513) calls `gb_alloc_from_driver` only. Replace the ENTIRE function body:
 
 ```c
 static cudaError_t CUDAAPI hooked_cudaMalloc(void **devPtr, size_t size)
 {
+    /* Deferred UVM probe -- runs once on first interception */
+    if (!gb_config.UvmProbed)
+        gb_probe_uvm_once();
+
     /* Only intercept allocations above threshold */
     if (size >= gb_config.ThresholdBytes && gb_config.Initialized) {
-        /* Lazy UVM probe on first interception */
-        if (!gb_config.UvmProbed)
-            gb_probe_uvm_once();
-
         /* Try UVM first */
         if (gb_config.UvmAvailable) {
             CUresult ret = gb_alloc_uvm(devPtr, size);
             if (ret == CUDA_SUCCESS)
                 return (cudaError_t)CUDA_SUCCESS;
-            gb_log("UVM alloc failed, trying driver path");
+            gb_log("UVM alloc failed (%d), trying driver path", ret);
         }
         /* Fall back to driver + HostRegister */
         {
@@ -374,27 +289,51 @@ static cudaError_t CUDAAPI hooked_cudaMalloc(void **devPtr, size_t size)
             if (ret == CUDA_SUCCESS)
                 return (cudaError_t)CUDA_SUCCESS;
         }
-        /* Both paths failed, fall through to real CUDA */
         gb_log("GreenBoost alloc failed, falling through to real cudaMalloc");
     }
     return real_cudaMalloc(devPtr, size);
 }
 ```
 
-### 3c: Apply same pattern to `hooked_cuMemAlloc_v2` and async variants
+### 4b: Replace `hooked_cudaMallocAsync` body
 
-For `hooked_cuMemAlloc_v2`, replace:
+Current code (lines ~522-531). Replace entire function:
+
+```c
+static cudaError_t CUDAAPI hooked_cudaMallocAsync(
+    void **devPtr, size_t size, cudaStream_t stream)
+{
+    if (!gb_config.UvmProbed)
+        gb_probe_uvm_once();
+
+    if (size >= gb_config.ThresholdBytes && gb_config.Initialized) {
+        if (gb_config.UvmAvailable) {
+            CUresult ret = gb_alloc_uvm(devPtr, size);
+            if (ret == CUDA_SUCCESS)
+                return (cudaError_t)CUDA_SUCCESS;
+        }
+        {
+            CUresult ret = gb_alloc_from_driver(devPtr, size);
+            if (ret == CUDA_SUCCESS)
+                return (cudaError_t)CUDA_SUCCESS;
+        }
+    }
+    return real_cudaMallocAsync(devPtr, size, stream);
+}
+```
+
+### 4c: Replace `hooked_cuMemAlloc_v2` body
+
+Current code (lines ~533-548). Replace entire function:
 
 ```c
 static CUresult CUDAAPI hooked_cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
 {
+    if (!gb_config.UvmProbed)
+        gb_probe_uvm_once();
+
     if (bytesize >= gb_config.ThresholdBytes && gb_config.Initialized) {
         void *ptr = NULL;
-        /* Lazy UVM probe on first interception */
-        if (!gb_config.UvmProbed)
-            gb_probe_uvm_once();
-
-        /* Try UVM first */
         if (gb_config.UvmAvailable) {
             CUresult ret = gb_alloc_uvm(&ptr, bytesize);
             if (ret == CUDA_SUCCESS) {
@@ -402,7 +341,6 @@ static CUresult CUDAAPI hooked_cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
                 return CUDA_SUCCESS;
             }
         }
-        /* Fall back to driver */
         {
             CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
             if (ret == CUDA_SUCCESS) {
@@ -410,44 +348,67 @@ static CUresult CUDAAPI hooked_cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
                 return CUDA_SUCCESS;
             }
         }
-        gb_log("GreenBoost alloc failed, falling through to real cuMemAlloc");
     }
     return real_cuMemAlloc_v2(dptr, bytesize);
 }
 ```
 
-For `hooked_cudaMallocAsync` and `hooked_cuMemAllocAsync`: apply the same UVM-first pattern. Each must include the lazy probe check:
+### 4d: Replace `hooked_cuMemAllocAsync` body
+
+Apply same pattern:
+
 ```c
-        if (!gb_config.UvmProbed)
-            gb_probe_uvm_once();
+static CUresult CUDAAPI hooked_cuMemAllocAsync(
+    CUdeviceptr *dptr, size_t bytesize, CUstream hStream)
+{
+    if (!gb_config.UvmProbed)
+        gb_probe_uvm_once();
+
+    if (bytesize >= gb_config.ThresholdBytes && gb_config.Initialized) {
+        void *ptr = NULL;
+        if (gb_config.UvmAvailable) {
+            CUresult ret = gb_alloc_uvm(&ptr, bytesize);
+            if (ret == CUDA_SUCCESS) {
+                *dptr = (CUdeviceptr)(uintptr_t)ptr;
+                return CUDA_SUCCESS;
+            }
+        }
+        {
+            CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
+            if (ret == CUDA_SUCCESS) {
+                *dptr = (CUdeviceptr)(uintptr_t)ptr;
+                return CUDA_SUCCESS;
+            }
+        }
+    }
+    return real_cuMemAllocAsync(dptr, bytesize, hStream);
+}
 ```
-before checking `gb_config.UvmAvailable`. The UVM alloc itself is synchronous but the returned pointer works in any stream context.
 
 ### SMOKE TEST:
-
 ```
-Build the shim DLL. Inject into a simple CUDA program that calls:
-  cudaMalloc(&ptr, 512 * 1024 * 1024);  // 512MB, above default 256MB threshold
-Check stderr output for:
-  "[GreenBoost] UVM alloc: 512MB -> ptr 0x... (prefetched to device 0)"
-Verify the returned pointer is usable:
-  cudaMemset(ptr, 0, 512 * 1024 * 1024);  // must not crash
-  cudaFree(ptr);  // must succeed
+Build the DLL. Inject into a CUDA program that does:
+  cudaMalloc(&ptr, 512 * 1024 * 1024);  // 512MB, above 256MB threshold
+Check stderr for EITHER:
+  "[GreenBoost] UVM alloc: 512MB -> ptr 0x..." (UVM path)
+  OR
+  "[GreenBoost] driver mapped 512MB at ..." (driver fallback)
+Both are correct. The key test: UVM path is ATTEMPTED first when UvmAvailable is TRUE.
 ```
 
-After completing Phase 3, read this document again.
+After completing Phase 4, read this document again.
 
 ---
 
-## Phase 4: Free Path Fix
+## Phase 5: Fix Free Path
 
-**Goal:** Branch the free path based on `is_managed` to handle UVM vs driver allocations correctly.
+**Goal:** Branch free logic on `is_managed` to correctly handle UVM vs driver allocations.
 
 **File:** `windows-port/shim/greenboost_cuda_shim_win.c`
 
-### 4a: Fix `gb_free_buffer()`
+### 5a: Replace `gb_free_buffer()` (lines ~414-434)
 
-Replace the current `gb_free_buffer()` implementation:
+Replace the ENTIRE function:
 
 ```c
 static int gb_free_buffer(CUdeviceptr ptr)
@@ -461,7 +422,7 @@ static int gb_free_buffer(CUdeviceptr ptr)
         return 0;  /* Not our allocation */
 
     if (is_managed) {
-        /* UVM allocation: just free via CUDA */
+        /* UVM allocation: free via CUDA directly */
         gb_log("freeing UVM buffer: ptr=%p size=%zuMB",
                (void *)(uintptr_t)ptr, size >> 20);
 
@@ -472,10 +433,9 @@ static int gb_free_buffer(CUdeviceptr ptr)
                            (void *)(uintptr_t)ptr, ret);
         }
 
-        /* Update shim-side accounting */
         InterlockedAdd64(&gb_config.UvmAllocatedBytes, -(LONG64)size);
     } else {
-        /* Driver allocation: unregister from CUDA, then free via driver */
+        /* Driver allocation: unregister from CUDA, then free via IOCTL */
         gb_log("freeing driver buffer: ptr=%p size=%zuMB buf_id=%d",
                (void *)(uintptr_t)ptr, size >> 20, buf_id);
 
@@ -489,9 +449,9 @@ static int gb_free_buffer(CUdeviceptr ptr)
 }
 ```
 
-### 4b: Fix `gb_shim_cleanup()` leak cleanup
+### 5b: Fix cleanup loop in `gb_shim_cleanup()` (lines ~1046-1057)
 
-In the `gb_shim_cleanup()` function, replace the loop that frees remaining tracked allocations:
+Replace the cleanup for-loop:
 
 ```c
     /* Free any remaining tracked allocations */
@@ -502,11 +462,11 @@ In the `gb_shim_cleanup()` function, replace the loop that frees remaining track
                    (void*)(uintptr_t)e->ptr, e->size, e->is_managed, e->gb_buf_id);
 
             if (e->is_managed) {
-                /* UVM: just free */
+                /* UVM: free directly */
                 if (real_cuMemFree_v2)
                     real_cuMemFree_v2(e->ptr);
             } else {
-                /* Driver path: unregister + driver free */
+                /* Driver: unregister + IOCTL free */
                 if (e->mapped_ptr && real_cuMemHostUnregister)
                     real_cuMemHostUnregister(e->mapped_ptr);
                 gb_free_driver_buf(e->gb_buf_id);
@@ -516,53 +476,61 @@ In the `gb_shim_cleanup()` function, replace the loop that frees remaining track
 ```
 
 ### SMOKE TEST:
-
 ```
-Inject shim into a CUDA program that:
-  1. Allocates 512MB via cudaMalloc (intercepted as UVM)
-  2. Calls cudaFree on the returned pointer
+Build. Inject into CUDA program:
+  cudaMalloc(&ptr, 512MB);   // intercepted
+  cudaFree(ptr);             // must free correctly
+
 Check stderr:
-  "[GreenBoost] UVM alloc: 512MB -> ptr 0x..."
-  "[GreenBoost] freeing UVM buffer: ptr=0x... size=512MB"
-Must NOT see "cuMemHostUnregister" or "gb_free_driver_buf" for UVM allocations.
+  If UVM: "freeing UVM buffer: ptr=... size=512MB"
+    Must NOT see "cuMemHostUnregister" in the log for this free.
+    Must NOT see "gb_free_driver_buf" for this free.
+  If driver: "freeing driver buffer: ptr=... size=512MB buf_id=N"
+    MUST see cuMemHostUnregister happening.
+
 No crashes. No leaks.
 ```
 
-After completing Phase 4, read this document again.
+After completing Phase 5, read this document again.
 
 ---
 
-## Phase 5: Prefetch Worker Enhancement
+## Phase 6: Extend Prefetch Worker
 
-**Goal:** Extend the prefetch worker to support CUDA device prefetch for UVM allocations, not just Win32 PrefetchVirtualMemory.
+**Goal:** Support CUDA device prefetch (UVM) alongside Win32 RAM prefetch (driver path).
 
 **File:** `windows-port/shim/greenboost_cuda_shim_win.c`
 
-### 5a: Extend prefetch_req_t
+### 6a: Extend `prefetch_req_t` struct (line ~77)
 
-Change the `prefetch_req_t` struct to include a managed flag:
-
+Replace:
 ```c
 typedef struct {
     void  *ptr;
     size_t size;
-    int    is_managed;    /* 1 = use cuMemPrefetchAsync, 0 = use PrefetchVirtualMemory */
-    int    to_device;     /* 1 = prefetch to GPU, 0 = prefetch to CPU (demote) */
 } prefetch_req_t;
 ```
 
-### 5b: Update prefetch_worker loop
+With:
+```c
+typedef struct {
+    void  *ptr;
+    size_t size;
+    int    is_managed;    /* 1 = use cuMemPrefetchAsync, 0 = PrefetchVirtualMemory */
+    int    to_device;     /* 1 = prefetch to GPU, 0 = demote to CPU */
+} prefetch_req_t;
+```
 
-Replace the body of the while loop in `prefetch_worker()`:
+### 6b: Update `prefetch_worker` loop body
+
+Replace the body inside the while loop (after dequeueing `req`) with:
 
 ```c
-        /* Dispatch based on allocation type */
         if (req.is_managed && real_cuMemPrefetchAsync) {
-            /* CUDA UVM prefetch */
+            /* CUDA UVM prefetch to GPU or CPU */
             CUdevice target = req.to_device
-                ? gb_config.GpuDevice                 /* promote to GPU VRAM */
-                : (CUdevice)-1;                       /* -1 = CPU in CUDA API */
-            /* Note: CU_DEVICE_CPU is typically -1 */
+                ? gb_config.GpuDevice
+                : (CUdevice)-1;            /* CU_DEVICE_CPU = -1 */
             CUresult pfRet = real_cuMemPrefetchAsync(
                 (CUdeviceptr)(uintptr_t)req.ptr,
                 req.size, target, NULL);
@@ -571,69 +539,84 @@ Replace the body of the while loop in `prefetch_worker()`:
                    req.to_device ? "GPU" : "CPU",
                    pfRet == CUDA_SUCCESS ? "OK" : "FAIL");
         } else if (pPrefetchVirtualMemory && req.ptr && req.size > 0) {
-            /* Win32 RAM prefetch (driver-path allocations) */
+            /* Win32 RAM prefetch for driver-path allocations */
             WIN32_MEMORY_RANGE_ENTRY range;
             range.VirtualAddress = req.ptr;
             range.NumberOfBytes = req.size;
             pPrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0);
-            gb_log("prefetch: PrefetchVirtualMemory on %p size=%zu", req.ptr, req.size);
+            gb_log("prefetch: PrefetchVirtualMemory on %p size=%zu",
+                   req.ptr, req.size);
         }
 ```
 
-### 5c: Update enqueue_prefetch signature
+### 6c: Update `enqueue_prefetch` signature and body (line ~124)
 
+Replace:
 ```c
-static void enqueue_prefetch(void *ptr, size_t size, int is_managed, int to_device)
-```
-
-Update the function body to store the new fields. Update ALL callers:
-- In `gb_alloc_from_driver()`: change `enqueue_prefetch(mappedPtr, (size_t)resp.size)` to `enqueue_prefetch(mappedPtr, (size_t)resp.size, 0, 1)`
-- In `gb_alloc_uvm()`: the initial prefetch is done inline via `cuMemPrefetchAsync`, so NO enqueue_prefetch call is needed at alloc time. The prefetch worker is for background promotion/demotion.
-
-### 5d: Add pressure-response prefetch (future-ready hook)
-
-Add a new function that can be called when the pressure event fires:
-
-```c
-/*
- * Demote UVM allocations to CPU when under memory pressure.
- * Called from pressure monitoring thread (future: pressure event watcher).
- * Walks the hash table and prefetches cold UVM buffers to CPU.
- */
-static void gb_demote_cold_uvm(void)
+static void enqueue_prefetch(void *ptr, size_t size)
 {
-    UINT i;
-    int demoted = 0;
+    if (!ptr || !prefetch_running)
+        return;
 
-    for (i = 0; i < HT_SIZE && demoted < 4; i++) {
-        gb_ht_entry_t *e = &gb_htable[i];
-        if (e->ptr != HT_EMPTY && e->ptr != HT_TOMBSTONE && e->is_managed) {
-            enqueue_prefetch((void *)(uintptr_t)e->ptr, e->size, 1, 0);
-            demoted++;
-        }
+    EnterCriticalSection(&prefetch_cs);
+    int next_head = (prefetch_head + 1) % PREFETCH_QUEUE_SIZE;
+    if (next_head != prefetch_tail) {
+        prefetch_queue[prefetch_head].ptr = ptr;
+        prefetch_queue[prefetch_head].size = size;
+        prefetch_head = next_head;
+        WakeConditionVariable(&prefetch_cv);
     }
-
-    if (demoted > 0)
-        gb_log("pressure response: demoting %d UVM buffers to CPU", demoted);
+    LeaveCriticalSection(&prefetch_cs);
 }
 ```
 
-This function is defined but not wired to the pressure event yet -- that's Phase 2 of the issue (#5). It's here so CC has the interface ready.
+With:
+```c
+static void enqueue_prefetch(void *ptr, size_t size, int is_managed, int to_device)
+{
+    if (!ptr || !prefetch_running)
+        return;
+
+    EnterCriticalSection(&prefetch_cs);
+    int next_head = (prefetch_head + 1) % PREFETCH_QUEUE_SIZE;
+    if (next_head != prefetch_tail) {
+        prefetch_queue[prefetch_head].ptr = ptr;
+        prefetch_queue[prefetch_head].size = size;
+        prefetch_queue[prefetch_head].is_managed = is_managed;
+        prefetch_queue[prefetch_head].to_device = to_device;
+        prefetch_head = next_head;
+        WakeConditionVariable(&prefetch_cv);
+    }
+    LeaveCriticalSection(&prefetch_cs);
+}
+```
+
+### 6d: Update the ONE existing caller of `enqueue_prefetch`
+
+In `gb_alloc_from_driver()` (around line 401-402), the call:
+```c
+    enqueue_prefetch(mappedPtr, (size_t)resp.size);
+```
+becomes:
+```c
+    enqueue_prefetch(mappedPtr, (size_t)resp.size, 0, 1);
+```
+(0 = not managed, 1 = to device -- this is the driver path, uses PrefetchVirtualMemory to bring pages into RAM)
 
 ### SMOKE TEST:
-
 ```
-Build successfully. The enqueue_prefetch signature change must not break any callers.
-Grep for "enqueue_prefetch" -- every call site must pass 4 arguments.
+Build. Grep for "enqueue_prefetch" -- every call site must pass 4 arguments.
+There should be exactly ONE call: in gb_alloc_from_driver.
+(gb_alloc_uvm does its own inline cuMemPrefetchAsync, no enqueue needed at alloc time.)
 ```
 
-After completing Phase 5, read this document again.
+After completing Phase 6, read this document again.
 
 ---
 
-## Phase 6: UVM Allocation Test
+## Phase 7: Test Program
 
-**Goal:** Create a standalone test program that validates UVM allocation through the shim.
+**Goal:** Standalone test validating UVM allocation through the shim.
 
 **File:** `windows-port/tests/test_uvm.c` (NEW FILE)
 
@@ -641,262 +624,155 @@ After completing Phase 5, read this document again.
 /* SPDX-License-Identifier: GPL-2.0-only
  * GreenBoost v2.3 -- UVM allocation test
  *
- * Tests that the shim correctly routes large allocations through
- * CUDA Unified Virtual Memory and that the returned pointers are
- * usable for GPU compute.
- *
  * Build: cl /O2 test_uvm.c /link cuda.lib
  * Run:   withdll.exe /d:greenboost_cuda.dll test_uvm.exe
- *
- * Expected: all tests PASS when shim is injected with UVM support.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <cuda_runtime.h>
 
-#define TEST_SIZE_SMALL  (64 * 1024 * 1024)      /* 64MB -- below threshold */
-#define TEST_SIZE_LARGE  (512 * 1024 * 1024)     /* 512MB -- above threshold */
-#define TEST_SIZE_MEDIUM (256 * 1024 * 1024)     /* 256MB -- at threshold */
+#define TEST_SMALL   (64  * 1024 * 1024)
+#define TEST_LARGE   (512 * 1024 * 1024)
+#define TEST_MEDIUM  (256 * 1024 * 1024)
 
-static int tests_run = 0;
-static int tests_passed = 0;
+static int n_run = 0, n_pass = 0;
 
-#define TEST_START(name) do { \
-    tests_run++; \
-    printf("Test %d: %s ... ", tests_run, name); \
-    fflush(stdout); \
-} while(0)
-
-#define TEST_PASS() do { \
-    tests_passed++; \
-    printf("PASS\n"); \
-} while(0)
-
-#define TEST_FAIL(fmt, ...) do { \
-    printf("FAIL: " fmt "\n", ##__VA_ARGS__); \
-} while(0)
+#define RUN(name)  do { n_run++; printf("Test %d: %s ... ", n_run, name); fflush(stdout); } while(0)
+#define PASS()     do { n_pass++; printf("PASS\n"); } while(0)
+#define FAIL(f,...)do { printf("FAIL: " f "\n", ##__VA_ARGS__); } while(0)
 
 int main(void)
 {
     void *ptr = NULL;
     cudaError_t err;
 
-    printf("=== GreenBoost UVM Allocation Tests ===\n\n");
+    printf("=== GreenBoost UVM Tests ===\n\n");
 
-    /* Test 1: Small allocation (should NOT be intercepted) */
-    TEST_START("small alloc passthrough");
-    err = cudaMalloc(&ptr, TEST_SIZE_SMALL);
-    if (err == cudaSuccess && ptr) {
-        cudaMemset(ptr, 0, TEST_SIZE_SMALL);
-        cudaFree(ptr);
-        ptr = NULL;
-        TEST_PASS();
-    } else {
-        TEST_FAIL("cudaMalloc failed: %d", err);
-    }
+    /* 1: Small alloc -- below threshold, passthrough */
+    RUN("small alloc passthrough");
+    err = cudaMalloc(&ptr, TEST_SMALL);
+    if (err == cudaSuccess && ptr) { cudaFree(ptr); ptr = NULL; PASS(); }
+    else FAIL("err=%d", err);
 
-    /* Test 2: Large allocation (should be intercepted, UVM or driver) */
-    TEST_START("large alloc interception");
-    err = cudaMalloc(&ptr, TEST_SIZE_LARGE);
-    if (err == cudaSuccess && ptr) {
-        TEST_PASS();
-    } else {
-        TEST_FAIL("cudaMalloc failed: %d", err);
-    }
+    /* 2: Large alloc -- above threshold, intercepted */
+    RUN("large alloc interception");
+    err = cudaMalloc(&ptr, TEST_LARGE);
+    if (err == cudaSuccess && ptr) PASS();
+    else FAIL("err=%d", err);
 
-    /* Test 3: GPU memset on intercepted allocation */
+    /* 3: GPU memset on intercepted buffer */
     if (ptr) {
-        TEST_START("GPU memset on intercepted buffer");
-        err = cudaMemset(ptr, 0xAB, TEST_SIZE_LARGE);
+        RUN("GPU memset on intercepted buffer");
+        err = cudaMemset(ptr, 0xAB, TEST_LARGE);
         if (err == cudaSuccess) {
             err = cudaDeviceSynchronize();
-            if (err == cudaSuccess)
-                TEST_PASS();
-            else
-                TEST_FAIL("sync failed: %d", err);
-        } else {
-            TEST_FAIL("memset failed: %d", err);
-        }
+            if (err == cudaSuccess) PASS();
+            else FAIL("sync err=%d", err);
+        } else FAIL("memset err=%d", err);
     }
 
-    /* Test 4: Free intercepted allocation */
+    /* 4: Free intercepted buffer */
     if (ptr) {
-        TEST_START("free intercepted buffer");
+        RUN("free intercepted buffer");
         err = cudaFree(ptr);
-        if (err == cudaSuccess) {
-            TEST_PASS();
-        } else {
-            TEST_FAIL("cudaFree failed: %d", err);
-        }
+        if (err == cudaSuccess) PASS();
+        else FAIL("err=%d", err);
         ptr = NULL;
     }
 
-    /* Test 5: Multiple large allocations */
-    TEST_START("multiple large allocs");
+    /* 5: Multiple large allocs */
+    RUN("4x 256MB allocs");
     {
-        void *ptrs[4] = {0};
-        int i, alloc_ok = 1;
+        void *p[4] = {0};
+        int i, ok = 1;
         for (i = 0; i < 4; i++) {
-            err = cudaMalloc(&ptrs[i], TEST_SIZE_MEDIUM);
-            if (err != cudaSuccess) {
-                printf("(alloc %d failed: %d) ", i, err);
-                alloc_ok = 0;
-                break;
-            }
+            if (cudaMalloc(&p[i], TEST_MEDIUM) != cudaSuccess) { ok = 0; break; }
         }
-        if (alloc_ok) {
-            /* Verify all are usable */
-            for (i = 0; i < 4; i++) {
-                cudaMemset(ptrs[i], (unsigned char)i, TEST_SIZE_MEDIUM);
-            }
+        if (ok) {
+            for (i = 0; i < 4; i++) cudaMemset(p[i], (unsigned char)i, TEST_MEDIUM);
             cudaDeviceSynchronize();
-            TEST_PASS();
-        } else {
-            TEST_FAIL("could not allocate all 4 buffers");
-        }
-        /* Cleanup */
-        for (i = 0; i < 4; i++) {
-            if (ptrs[i]) cudaFree(ptrs[i]);
-        }
+            PASS();
+        } else FAIL("alloc %d failed", i);
+        for (i = 0; i < 4; i++) if (p[i]) cudaFree(p[i]);
     }
 
-    /* Test 6: Memory info spoofing still works */
-    TEST_START("memory info reports extended VRAM");
+    /* 6: VRAM spoofing active */
+    RUN("VRAM spoofing reports extended memory");
     {
-        size_t free_mem = 0, total_mem = 0;
-        err = cudaMemGetInfo(&free_mem, &total_mem);
+        size_t fr = 0, tot = 0;
+        err = cudaMemGetInfo(&fr, &tot);
         if (err == cudaSuccess) {
-            printf("(total=%zuMB free=%zuMB) ", total_mem >> 20, free_mem >> 20);
-            /* With shim active, total should be > physical VRAM */
-            if (total_mem > (size_t)24 * 1024 * 1024 * 1024ULL) {
-                TEST_PASS();  /* More than 24GB means spoofing is active */
-            } else {
-                TEST_FAIL("total VRAM not spoofed (shim may not be active)");
-            }
-        } else {
-            TEST_FAIL("cudaMemGetInfo failed: %d", err);
-        }
+            printf("(total=%zuMB free=%zuMB) ", tot >> 20, fr >> 20);
+            if (tot > (size_t)24ULL * 1024 * 1024 * 1024) PASS();
+            else FAIL("total not spoofed -- shim may not be active");
+        } else FAIL("err=%d", err);
     }
 
-    printf("\n=== Results: %d/%d passed ===\n", tests_passed, tests_run);
-    return (tests_passed == tests_run) ? 0 : 1;
+    printf("\n=== %d/%d passed ===\n", n_pass, n_run);
+    return (n_pass == n_run) ? 0 : 1;
 }
 ```
 
 ### SMOKE TEST:
-
 ```
-Compile test_uvm.c. Run with shim injected. All 6 tests pass.
-Run WITHOUT shim injected. Tests 1 should pass. Tests 2-5 should pass (native CUDA).
-Test 6 should FAIL (no spoofing without shim). This confirms the shim is actually intercepting.
+Compiles with CUDA toolkit. All 6 tests pass with shim injected.
+Test 6 fails WITHOUT shim (confirming shim is active).
 ```
 
-After completing Phase 6, read this document again.
+After completing Phase 7, read this document again.
 
 ---
 
-## Phase 7: Reconciliation Review
+## Phase 8: Reconciliation Review
 
-Before declaring the build complete, verify what you built:
+Before declaring complete, verify:
 
 ### Code Consistency
-1. Read `.nsca/repo_profile.md` (or generate it)
-2. For every file you created or modified:
-   - Variable names consistent with naming conventions in related files?
-   - Imports resolve to actual modules?
-   - Function usage matches actual signatures in existing code?
-3. Grep for key variable/function names you introduced:
-   - `gb_alloc_uvm` -- no collisions?
-   - `UvmAvailable`, `UvmProbed`, `UvmAllocatedBytes`, `GpuDevice` -- no collisions with existing config fields?
-   - `gb_demote_cold_uvm` -- no collisions?
-   - `real_cuMemPrefetchAsync`, `real_cuCtxGetDevice`, `real_cuMemAllocManaged` -- no collisions?
+1. Every call to `enqueue_prefetch` passes 4 arguments (grep to confirm)
+2. `gb_alloc_uvm` uses `real_cuMemAllocManaged_drv` (NOT `real_cudaMallocManaged` which is runtime API)
+3. `gb_free_buffer` checks `is_managed` BEFORE calling any cleanup function
+4. Cleanup loop in `gb_shim_cleanup` checks `is_managed` BEFORE calling any cleanup function
+5. No CUDA API calls exist in `gb_shim_init()`
+6. `gb_alloc_from_driver()` is UNCHANGED from the version that was there before this build
+7. `gb_probe_uvm_once()` is UNCHANGED from the version that was there before this build
 
-### Data Pipeline Integrity
-4. Trace the UVM alloc path end-to-end:
-   - `hooked_cudaMalloc` receives `(void **devPtr, size_t size)`
-   - Checks `!gb_config.UvmProbed` -- if first call, runs `gb_probe_uvm_once()`
-   - `gb_probe_uvm_once()` atomically sets UvmProbed=TRUE, probes cuMemAllocManaged(4096), sets UvmAvailable
-   - If `UvmAvailable`: calls `gb_alloc_uvm(devPtr, size)`
-   - `gb_alloc_uvm` calls `real_cuMemAllocManaged(&dptr, size, CU_MEM_ATTACH_GLOBAL)`
-   - Returns `CUdeviceptr` via `*devPtr = (void*)(uintptr_t)dptr`
-   - Hash table entry: `ptr=dptr, size=size, is_managed=1, gb_buf_id=0, mapped_ptr=NULL`
-   - Later: `hooked_cudaFree(devPtr)` -> `gb_free_buffer((CUdeviceptr)devPtr)`
-   - `ht_remove` returns `is_managed=1` -> calls `real_cuMemFree_v2(ptr)`
-   - Does NOT call `cuMemHostUnregister` or `gb_free_driver_buf`
-   - **CRITICAL: The probe MUST happen inside a hook function, never in gb_shim_init(), because no CUDA context exists at DLL_PROCESS_ATTACH time.**
-   - **Verify this trace is complete and correct.**
+### Data Pipeline Trace
+8. UVM alloc path: `hooked_cudaMalloc` -> probe check -> `gb_alloc_uvm` -> `real_cuMemAllocManaged_drv` -> `cuMemPrefetchAsync` -> ht_insert(is_managed=1, buf_id=0, mapped_ptr=NULL) -> return
+9. UVM free path: `hooked_cudaFree` -> `gb_free_buffer` -> ht_remove -> is_managed=1 -> `real_cuMemFree_v2` -> InterlockedAdd64 accounting -> return
+10. Driver alloc path: UNCHANGED. `hooked_cudaMalloc` -> UVM unavailable or failed -> `gb_alloc_from_driver` -> IOCTL -> cuMemHostRegister -> ht_insert(is_managed=0) -> return
+11. Driver free path: UNCHANGED. `gb_free_buffer` -> is_managed=0 -> `cuMemHostUnregister` -> `gb_free_driver_buf` -> return
 
-5. Trace the fallback (driver) path -- MUST STILL WORK:
-   - `hooked_cudaMalloc` -> UVM fails -> `gb_alloc_from_driver(devPtr, size)`
-   - IOCTL_ALLOC -> driver maps pages -> cuMemHostRegister -> cuMemHostGetDevicePointer
-   - Hash table: `is_managed=0, gb_buf_id=N, mapped_ptr=userVA`
-   - Free: `is_managed=0` -> `cuMemHostUnregister(mapped_ptr)` + `gb_free_driver_buf(buf_id)`
-   - **Verify the driver path is unchanged.**
-
-### Blast Radius
-6. Files modified: only `greenboost_cuda_shim_win.h` and `greenboost_cuda_shim_win.c`
-   - Neither is a dependency hotspot in the profile
-   - No other files import from the shim
-   - The driver code is NOT modified
-
-7. Run existing test_ioctl tests -- they must still pass (driver path unchanged)
+### Verify NO recursion
+12. grep for `cuMemAllocManaged` in the Detours attach list. It must NOT be there. If `hooked_cuMemAllocManaged` or any hook for that function exists, REMOVE IT.
 
 ### Verdict
-- Issues found: Fix before proceeding, document in commit message
-- All clear: Proceed to profile update
+Issues found -> fix before committing.
+All clear -> commit and update profile.
 
 ---
 
-## Phase 8: Finalize
+## Phase 9: Finalize
 
-1. Commit all changes with message:
-   ```
-   Shim: UVM-first allocation with driver fallback (closes #5 Phase 1)
+Commit message:
+```
+Wire UVM into allocation/free/prefetch paths (Phase 3-7 of #5)
 
-   - cuMemAllocManaged replaces cuMemHostRegister as primary alloc path
-   - cuMemPrefetchAsync stages pages to GPU VRAM on allocation
-   - Fallback to driver+HostRegister if UVM unavailable
-   - Free path branches on is_managed (UVM: cuMemFree, driver: unregister+IOCTL)
-   - Prefetch worker extended for CUDA device prefetch
-   - UVM capability probed at init with small test allocation
-   - New test_uvm.c validates UVM path end-to-end
-   ```
+- gb_alloc_uvm(): UVM allocation with cuMemPrefetchAsync to GPU
+- All 4 allocation hooks: UVM-first with driver fallback
+- gb_free_buffer(): branch on is_managed (UVM: cuMemFree, driver: unregister+IOCTL)
+- Cleanup loop: is_managed-aware leak cleanup
+- Prefetch worker: CUDA device prefetch for UVM, Win32 prefetch for driver path
+- test_uvm.c: 6-test validation suite
+```
 
-2. Generate and push repo profile:
-   ```
-   python3 repo_profile_gen.py --owner denoflore --repo GreenBoost-Windows \
-     --token $GH_TOKEN --format both --push
-   ```
+Regenerate profile:
+```
+python3 repo_profile_gen.py --owner denoflore --repo GreenBoost-Windows --token $GH_TOKEN --format both --push
+```
 
 ---
 
-## ARCHITECTURAL NOTES
+## WHY THIS MATTERS
 
-### Why UVM over explicit staging?
-
-UVM is the minimal-code-change path that lets the NVIDIA driver handle page migration. For inference workloads (sequential weight reads, mostly-read access patterns), NVIDIA's UVM heuristics are well-optimized. The driver pre-fetches pages the GPU is about to access and evicts cold pages back to RAM. This matches the GreenBoost use case almost exactly.
-
-Explicit staging (Option B from issue #5) gives more control but requires model-level knowledge of which layers are hot. That's framework-specific and belongs in the ExLlama/ComfyUI integration patches, not the generic shim.
-
-### Why keep the driver?
-
-Even with UVM handling allocation, the driver provides:
-1. **Registry configuration** -- threshold, pool sizes, debug mode
-2. **Pressure monitoring** -- watchdog thread tracks RAM and pagefile pressure
-3. **Named event signaling** -- shim can watch for pressure and demote UVM pages
-4. **VRAM size context** -- physical vs virtual VRAM for spoofing calculations
-5. **PIN_USER_PTR** -- external buffer pinning can't use UVM
-
-### Expected performance impact
-
-For weights that fit in physical VRAM: near-native speed. NVIDIA's UVM driver will migrate hot pages to VRAM and keep them there. First-access latency is ~5-15us per 64KB page (page fault + migration), but after initial load, subsequent reads hit VRAM directly.
-
-For weights that overflow VRAM: the NVIDIA driver manages the eviction policy. Hot layers stay in VRAM, cold layers spill to RAM. This is the same PCIe bandwidth as before, but only for overflow -- not for everything.
-
-Worst case (VRAM thrashing): if the working set oscillates between two sets of pages both larger than VRAM, UVM will thrash. This is unlikely for inference (sequential layer access) but possible for training. GreenBoost targets inference.
-
-### CU_DEVICE_CPU constant
-
-CUDA uses -1 (or `CU_DEVICE_CPU` which equals -1) as the device ordinal for "prefetch to CPU". This is how `gb_demote_cold_uvm` tells the NVIDIA driver to move pages back to system RAM. The `(CUdevice)-1` cast is intentional.
+Before this build: every GPU access to GreenBoost memory traverses PCIe (~32 GB/s). After: NVIDIA's UVM driver migrates hot pages to VRAM (~1008 GB/s on 4090). For inference workloads where model weights fit in physical VRAM, this is the difference between 11s/it and 38s/it. The driver fallback ensures older GPUs and edge cases still work.
