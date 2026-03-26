@@ -1,3 +1,5 @@
+![GreenBoost Windows](assets/header.png)
+
 # GreenBoost Windows Port
 
 **Original work by [Ferran Duarri](https://gitlab.com/IsolatedOctopi/nvidia_greenboost) (GPL v2)**
@@ -104,3 +106,4 @@ Original work: Copyright (C) 2024-2026 Ferran Duarri
 Windows port: Copyright (C) 2026 Chris Zuger
 SPDX-License-Identifier: GPL-2.0-only
 ```
+
