@@ -250,6 +250,44 @@ typedef struct _GB_DEVICE_WIN {
     ULONG               DebugMode;
 } GB_DEVICE_WIN, *PGB_DEVICE_WIN;
 
+/* ------------------------------------------------------------------ */
+/*  Per-file context -- tracks buffers owned by each open handle        */
+/*                                                                      */
+/*  When a process opens \\.\GreenBoost, WDF creates a WDFFILEOBJECT.  */
+/*  We store a bitmap of buffer IDs allocated through that handle.      */
+/*  On EvtFileCleanup (process close/crash), we free all owned bufs.   */
+/*  This prevents permanent memory leaks when the shim crashes.        */
+/* ------------------------------------------------------------------ */
+
+#define GB_FILE_MAX_BUFS_WORDS  ((GB_MAX_BUFS + 31) / 32)
+
+typedef struct _GB_FILE_CONTEXT {
+    ULONG   OwnedBufs[GB_FILE_MAX_BUFS_WORDS];  /* bitmap of owned buf IDs */
+    LONG    OwnedCount;                           /* count for quick check   */
+} GB_FILE_CONTEXT, *PGB_FILE_CONTEXT;
+
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(GB_FILE_CONTEXT, GbGetFileContext)
+
+static __inline VOID GbFileContextSetBuf(PGB_FILE_CONTEXT ctx, LONG id) {
+    if (id > 0 && id < GB_MAX_BUFS) {
+        ctx->OwnedBufs[id / 32] |= (1u << (id % 32));
+        InterlockedIncrement(&ctx->OwnedCount);
+    }
+}
+
+static __inline VOID GbFileContextClearBuf(PGB_FILE_CONTEXT ctx, LONG id) {
+    if (id > 0 && id < GB_MAX_BUFS) {
+        ctx->OwnedBufs[id / 32] &= ~(1u << (id % 32));
+        InterlockedDecrement(&ctx->OwnedCount);
+    }
+}
+
+static __inline BOOLEAN GbFileContextOwnsBuf(PGB_FILE_CONTEXT ctx, LONG id) {
+    if (id > 0 && id < GB_MAX_BUFS)
+        return (ctx->OwnedBufs[id / 32] & (1u << (id % 32))) != 0;
+    return FALSE;
+}
+
 /* Global device instance */
 extern GB_DEVICE_WIN GbGlobalDevice;
 
@@ -261,6 +299,9 @@ extern GB_DEVICE_WIN GbGlobalDevice;
 DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_DEVICE_ADD GbEvtDeviceAdd;
 EVT_WDF_DEVICE_CONTEXT_CLEANUP GbEvtDeviceCleanup;
+
+/* File object cleanup -- frees buffers on process exit/crash */
+EVT_WDF_FILE_CLEANUP GbEvtFileCleanup;
 
 /* IOCTL dispatch */
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL GbEvtIoDeviceControl;
@@ -301,3 +342,4 @@ NTSTATUS GbReadConfig(VOID);
 VOID GbQueryMemoryStatus(_Out_ PULONG64 TotalBytes, _Out_ PULONG64 AvailBytes);
 
 #endif /* GREENBOOST_WIN_H */
+
