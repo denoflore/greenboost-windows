@@ -21,6 +21,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\GreenBoost\Parameters"
+$ShimRegPath = "HKLM:\SOFTWARE\GreenBoost"
 $DriverName = "GreenBoost"
 
 function Write-Status($msg) { Write-Host "[GreenBoost] $msg" -ForegroundColor Green }
@@ -114,6 +115,15 @@ function Set-Config {
     Set-ItemProperty -Path $RegPath -Name "NvmePoolGb"      -Value $NvmePoolGb      -Type DWord
     Set-ItemProperty -Path $RegPath -Name "ThresholdMb"     -Value $ThresholdMb     -Type DWord
     
+    # Mirror shim-relevant values to SOFTWARE\GreenBoost for backward compat
+    if (-not (Test-Path $ShimRegPath)) {
+        New-Item -Path $ShimRegPath -Force | Out-Null
+    }
+    Set-ItemProperty -Path $ShimRegPath -Name "PhysicalVramGb"  -Value $PhysicalVramGb  -Type DWord
+    Set-ItemProperty -Path $ShimRegPath -Name "VirtualVramGb"   -Value $VirtualVramGb   -Type DWord
+    Set-ItemProperty -Path $ShimRegPath -Name "ThresholdMb"     -Value $ThresholdMb     -Type DWord
+    Set-ItemProperty -Path $ShimRegPath -Name "DebugMode"       -Value 0                -Type DWord
+    
     Write-Status "Configuration updated:"
     Write-Status "  T1 Physical VRAM : $PhysicalVramGb GB"
     Write-Status "  T2 DDR4 Pool     : $VirtualVramGb GB"
@@ -182,3 +192,4 @@ if ($Restart) {
 }
 
 Show-Config
+
