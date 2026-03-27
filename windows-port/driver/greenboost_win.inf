@@ -70,7 +70,9 @@ ServiceBinary  = %13%\greenboost_win.sys
 KmdfService = GreenBoost, GreenBoost_wdfsect
 
 [GreenBoost_wdfsect]
-KmdfLibraryVersion = $KMDFVERSION$
+; KMDF 1.33 = WDK 10.0.22621+ (Win10 21H2+ / Win11)
+; Adjust if targeting a different WDK version.
+KmdfLibraryVersion = 1.33
 
 ; ----------------------------------------------------------------
 ;  Strings
