@@ -12,7 +12,37 @@ All notable changes to the GreenBoost Windows port.
 
 ---
 
-## 2026-03-26
+## 2026-03-26 (Audit)
+
+### Fixed -- Full Codebase Audit (20 issues, all resolved)
+
+**Critical (4):**
+- **Registry path mismatch**: Shim read config from `SOFTWARE\GreenBoost` while driver and install scripts wrote to `Services\GreenBoost\Parameters`. Shim always ran on hardcoded defaults. Fixed: shim now reads Services path first, falls back to SOFTWARE. Install scripts write to both.
+- **Pressure event namespace mismatch**: Shim opened `GreenBoostPressure` (session-local) instead of `Global\GreenBoostPressure` (kernel namespace). The watchdog's pressure signaling was completely disconnected from the shim. Fixed with `Global\` prefix.
+- **No process crash cleanup**: Driver had no `EvtFileCleanup` callback. Crashed processes permanently leaked pinned physical memory until reboot. Fixed: added `GB_FILE_CONTEXT` per-file-object bitmap tracking buffer ownership, freed on handle close/crash.
+- **Fake eviction corrupting accounting**: `GbHandleEvict` moved pool bytes from T2 to T3 counters without actually freeing RAM. Safety reserve math reported false headroom, enabling OOM. Fixed: eviction no longer manipulates pool accounting (memory stays in RAM; tier relabel is for shim bookkeeping only).
+
+**High (4):**
+- **IAT hooking fallback only hooked `cudaMalloc`**: Without Detours, `cudaFree`, `cuMemAlloc_v2`, `cuMemFree_v2`, memory info spoofing were all unhooked. Every allocation leaked. Fixed: expanded IAT hooks to cover 7 critical functions across both cudart and nvcuda DLLs.
+- **`GbHandleReset` was a no-op**: Logged "RESET requested" and returned success without freeing anything. Fixed: walks `BufTable` and frees all active buffers.
+- **`cudaMallocManaged` (runtime API) not intercepted**: Function pointer was resolved but never passed to `DetourAttach`. PyTorch managed memory path bypassed GreenBoost. Fixed: added `hooked_cudaMallocManaged` implementation + Detour attach/detach.
+- **Build pipeline broken**: `build.ps1` had driver build disabled and 117 lines of commented-out signing/catalog code. `install.ps1` expected artifacts that `build.ps1` never collected. Fixed: cleaned dead code, fixed step numbering, added INF collection to outputs.
+
+**Medium (5):**
+- **SDDL too permissive**: Device was accessible to Everyone (WD). Changed to Interactive Users (IU).
+- **VRAM spoofing underflow**: `cudaMemGetInfo` and `cuMemGetInfo` could wrap to ~2^64 if configured VRAM < actual. Added underflow guards.
+- **INF `$KMDFVERSION$` placeholder**: Replaced with concrete `1.33` (WDK 10.0.22621+).
+- **`DeviceHandle` initialized to 0** (valid handle on Windows): Added explicit `INVALID_HANDLE_VALUE` assignment at top of `gb_shim_init`.
+- **Hash table tombstone accumulation**: Added `ht_reclaim_tombstones()` with 25% threshold trigger, full probe chain rebuild under exclusive lock.
+
+**Low (7):**
+- Removed 18 committed Linux build artifacts from repo root (`.o`, `.ko`, `.so`, `.cmd` files).
+- Removed accidental pip install log files (`=2.6.0`, `=2.7.4.post1`).
+- Translated `sign.ps1` from Chinese to English.
+- Fixed `build.ps1` ASCII art (was gibberish, now says GreenBoost).
+- Removed Ollama references from `diagnose.ps1`.
+- Wired `test_uvm.c` into CMake with conditional `find_package(CUDAToolkit)`.
+- Fixed `build.ps1` step numbering ([1/5]...[6/6] became [1/4]...[4/4]).
 
 ### Added
 - **UVM allocation path** (PR #8, PR #6): The shim now allocates via `cuMemAllocManaged` with `cuMemPrefetchAsync` to GPU as the primary path. NVIDIA's UVM driver handles transparent page migration between VRAM and RAM. Weights that fit in physical VRAM are accessed at full HBM bandwidth instead of being PCIe-bound. Fallback to driver+cuMemHostRegister when UVM is unavailable.
@@ -63,3 +93,4 @@ All notable changes to the GreenBoost Windows port.
 
 ### Fixed
 - Critical memory sharing bug: replaced `ZwCreateSection` (creates anonymous pagefile-backed memory) with `MmMapLockedPagesSpecifyCache(UserMode)` (maps actual pinned physical pages into calling process).
+
