@@ -34,9 +34,9 @@ Everything from Ferran's original repo (untouched, his README preserved as `READ
 
 **Driver** (~1,900 lines)
 
-`driver/greenboost_win.c` -- KMDF kernel driver. Allocates pinned 2MB contiguous blocks, maps into userspace via MDL, monitors RAM/pagefile pressure, manages LRU buffer lifecycle with three-tier eviction.
+`driver/greenboost_win.c` -- KMDF kernel driver. Allocates pinned 2MB contiguous blocks, maps into userspace via MDL, monitors RAM/pagefile pressure, manages LRU buffer lifecycle with three-tier tracking. Per-handle buffer ownership tracking frees all allocations on process exit or crash.
 
-`driver/greenboost_win.h` -- Device state structs, system information types for memory queries.
+`driver/greenboost_win.h` -- Device state structs, per-file context for crash cleanup, system information types for memory queries.
 
 `driver/greenboost_ioctl_win.h` -- Windows IOCTL definitions (CTL_CODE). Shared between driver and shim.
 
@@ -44,9 +44,9 @@ Everything from Ferran's original repo (untouched, his README preserved as `READ
 
 **CUDA Shim** (~1,450 lines)
 
-`shim/greenboost_cuda_shim_win.c` -- DLL that hooks cudaMalloc/cudaFree via Microsoft Detours. Routes large allocations through CUDA UVM (primary) or driver-mapped pinned pages (fallback). Spoofs VRAM reporting so inference engines see extended memory.
+`shim/greenboost_cuda_shim_win.c` -- DLL that hooks cudaMalloc/cudaFree/cudaMallocManaged and 10 other CUDA/NVML functions via Microsoft Detours (with expanded IAT patching fallback). Routes large allocations through CUDA UVM (primary) or driver-mapped pinned pages (fallback). Spoofs VRAM reporting so inference engines see extended memory.
 
-`shim/greenboost_cuda_shim_win.h` -- Fibonacci hash table, config struct, CUDA type stubs, UVM prefetch typedefs.
+`shim/greenboost_cuda_shim_win.h` -- Fibonacci hash table with tombstone reclamation, config struct, CUDA type stubs, UVM prefetch typedefs.
 
 **Tests** (~530 lines)
 
@@ -56,11 +56,11 @@ Everything from Ferran's original repo (untouched, his README preserved as `READ
 
 **Tools** (~1,150 lines)
 
-`tools/build.ps1` -- Automated VS2022 + WDK + vcpkg build.
-`tools/install.ps1` -- Hardware detection, registry config, driver install.
-`tools/sign.ps1` -- Test-signing automation.
-`tools/config.ps1` -- Registry configuration utility.
-`tools/diagnose.ps1` -- Health check script.
+`build.ps1` -- Automated VS2022 + CMake build with artifact collection.
+`sign.ps1` -- Test-signing automation.
+`tools/install.ps1` -- Hardware detection, dual-path registry config, driver install.
+`tools/config.ps1` -- Registry configuration utility (writes both driver and shim paths).
+`tools/diagnose.ps1` -- Health check script (verifies driver, device, registry, CUDA libs).
 
 **Build System** (~200 lines)
 
@@ -97,11 +97,11 @@ The full architecture mapping is documented in `windows-port/CC_INSTRUCTIONS.md`
 
 **GPU memory path:** Linux relies on DMA-BUF + HMM for transparent page migration between VRAM and RAM. Windows has no kernel-level equivalent, so the shim uses CUDA Unified Virtual Memory (UVM) to let the NVIDIA driver handle page migration. This is the closest Windows equivalent and delivers near-native VRAM bandwidth for hot pages.
 
-**Buffer lifecycle:** Linux relies on `close(fd)` triggering the DMA-BUF release callback for automatic cleanup. Windows has no equivalent for MDL user mappings, so we added an explicit `GB_IOCTL_FREE` that the shim calls on `cudaFree`. The driver tracks the owning process so it can do cross-process cleanup via `KeStackAttachProcess` if needed during driver unload.
+**Buffer lifecycle:** Linux relies on `close(fd)` triggering the DMA-BUF release callback for automatic cleanup. Windows has no equivalent for MDL user mappings, so we added an explicit `GB_IOCTL_FREE` that the shim calls on `cudaFree`. The driver also tracks buffer ownership per file handle via `EvtFileCleanup`, so if the shim process crashes or is killed, all its pinned buffers are automatically freed rather than leaking until reboot.
 
 **CUDA hook injection:** Linux uses `LD_PRELOAD` + a `dlsym` intercept (because Ollama resolves symbols via `dlopen` internally). Windows uses Microsoft Detours (MIT licensed) for API hooking, with an IAT patching fallback.
 
-**Hash table bug fix:** The original Linux `ht_remove` zeroes deleted slots with `memset(e, 0, sizeof(*e))`, which breaks open-addressing probe chains. A lookup for a key that hashed past the deleted slot would stop early at the zeroed slot and miss the target. The Windows port uses tombstone markers instead, which preserves probe chain integrity. This is a bug in the upstream Linux code too.
+**Hash table bug fix:** The original Linux `ht_remove` zeroes deleted slots with `memset(e, 0, sizeof(*e))`, which breaks open-addressing probe chains. A lookup for a key that hashed past the deleted slot would stop early at the zeroed slot and miss the target. The Windows port uses tombstone markers instead, which preserves probe chain integrity. A periodic reclamation pass rebuilds probe chains when tombstones exceed 25% of table capacity. This is a bug in the upstream Linux code too.
 
 **Registry reading:** Uses `ZwOpenKey`/`ZwQueryValueKey` with absolute registry path (`Services\GreenBoost\Parameters`) instead of WDF registry helpers, for reliability at early driver init before the framework is fully set up.
 
@@ -113,12 +113,15 @@ The full architecture mapping is documented in `windows-port/CC_INSTRUCTIONS.md`
 
 ## Status
 
-**Built and community-tested.** The driver and shim have been compiled on Win11 + VS2022 + WDK and tested with dynamic injection into Python processes (ComfyUI). Build automation scripts are included. The UVM allocation path is implemented and the test suite passes.
+**Audited and hardened.** A full codebase audit (March 2026) identified and resolved 20 issues across the driver, shim, build pipeline, and tooling -- including 4 critical integration bugs where the shim and driver disagreed on registry paths, event namespaces, and memory accounting. The driver now includes process crash cleanup (no more leaked pinned memory on shim death), honest eviction accounting, and tightened device security. The shim correctly reads configured values, receives pressure notifications, and hooks all critical CUDA allocation paths. See `CHANGELOG.md` for the full breakdown.
+
+The driver and shim have been compiled on Win11 + VS2022 + WDK and tested with dynamic injection into Python processes (ComfyUI). Build automation scripts are included. The UVM allocation path is implemented and the test suite passes.
 
 Known limitations:
 - Inference speed with the driver fallback path (non-UVM) is significantly slower due to PCIe bandwidth constraints. UVM path recommended for all modern GPUs.
 - Test signing required for driver installation (standard for development).
 - Not yet tested with Driver Verifier for production hardening.
+- Eviction (`GB_IOCTL_EVICT`) is a soft operation: buffers are deprioritized but physical RAM is not reclaimed. True page migration would require unmapping the CUDA-registered VA.
 
 Contributions welcome. See open issues for areas that could use help.
 
@@ -153,4 +156,5 @@ Original work: Copyright (C) 2024-2026 Ferran Duarri
 Windows port: Copyright (C) 2026 Chris Zuger
 SPDX-License-Identifier: GPL-2.0-only
 ```
+
 
