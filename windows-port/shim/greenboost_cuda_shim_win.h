@@ -103,6 +103,7 @@ typedef nvmlReturn_t (*pfn_nvmlDeviceGetMemoryInfo_v2)(nvmlDevice_t, nvmlMemory_
 #define HT_SIZE    (1u << HT_BITS)       /* 131072 slots */
 #define HT_MASK    (HT_SIZE - 1u)
 #define HT_LOCKS   64u
+#define HT_TOMBSTONE_THRESHOLD  (HT_SIZE / 4)  /* Reclaim when 25% tombstones */
 
 /* Sentinel values for open-addressing */
 #define HT_EMPTY    ((CUdeviceptr)0)
@@ -155,6 +156,7 @@ typedef struct {
 extern gb_shim_config_t  gb_config;
 extern gb_ht_entry_t     gb_htable[HT_SIZE];
 extern CRITICAL_SECTION  ht_locks[HT_LOCKS];
+extern volatile LONG gb_tombstone_count;
 
 /* Hash table functions */
 static inline uint32_t ht_hash(CUdeviceptr ptr)

@@ -44,6 +44,7 @@
 gb_shim_config_t  gb_config = { 0 };
 gb_ht_entry_t     gb_htable[HT_SIZE];
 CRITICAL_SECTION  ht_locks[HT_LOCKS];
+volatile LONG gb_tombstone_count = 0;
 
 /* Real function pointers (resolved at init) */
 static pfn_cudaMalloc           real_cudaMalloc          = NULL;
@@ -187,6 +188,8 @@ static int ht_insert(CUdeviceptr ptr, size_t size, int is_managed,
 
         EnterCriticalSection(lk);
         if (e->ptr == HT_EMPTY || e->ptr == HT_TOMBSTONE) {
+            if (e->ptr == HT_TOMBSTONE)
+                InterlockedDecrement(&gb_tombstone_count);
             e->ptr            = ptr;
             e->size           = size;
             e->is_managed     = is_managed;
@@ -199,6 +202,8 @@ static int ht_insert(CUdeviceptr ptr, size_t size, int is_managed,
     }
     return 0;  /* table full */
 }
+
+static void ht_reclaim_tombstones(void);  /* forward declaration */
 
 /*
  * Remove an entry. Returns 1 if found, fills output params.
@@ -232,12 +237,16 @@ static int ht_remove(CUdeviceptr ptr, size_t *out_size, int *out_managed,
 
             /* Mark as tombstone -- probing continues past this slot */
             e->ptr            = HT_TOMBSTONE;
+            InterlockedIncrement(&gb_tombstone_count);
             e->size           = 0;
             e->is_managed     = 0;
             e->gb_buf_id      = -1;
             e->mapped_ptr     = NULL;
 
             LeaveCriticalSection(lk);
+            /* Trigger reclamation if tombstones are accumulating */
+            if (gb_tombstone_count > HT_TOMBSTONE_THRESHOLD)
+                ht_reclaim_tombstones();
             return 1;
         }
 
@@ -274,6 +283,59 @@ static int ht_lookup(CUdeviceptr ptr, gb_ht_entry_t *out)
         LeaveCriticalSection(lk);
     }
     return 0;
+}
+
+/*
+ * Reclaim tombstone slots by compacting probe chains.
+ * Called periodically when tombstone count exceeds threshold.
+ * Must NOT be called while any other ht operation is in progress
+ * on the same slot range -- we acquire ALL locks sequentially.
+ */
+static void ht_reclaim_tombstones(void)
+{
+    uint32_t i;
+    LONG reclaimed = 0;
+
+    /* Acquire all locks to ensure exclusive access */
+    for (i = 0; i < HT_LOCKS; i++)
+        EnterCriticalSection(&ht_locks[i]);
+
+    for (i = 0; i < HT_SIZE; i++) {
+        if (gb_htable[i].ptr == HT_TOMBSTONE) {
+            gb_htable[i].ptr = HT_EMPTY;
+            reclaimed++;
+        }
+    }
+
+    /*
+     * After clearing tombstones to EMPTY, some entries that were
+     * inserted past a tombstone may now be unreachable. Re-insert
+     * all live entries to fix probe chains.
+     */
+    for (i = 0; i < HT_SIZE; i++) {
+        if (gb_htable[i].ptr != HT_EMPTY && gb_htable[i].ptr != HT_TOMBSTONE) {
+            gb_ht_entry_t saved = gb_htable[i];
+            gb_htable[i].ptr = HT_EMPTY;
+
+            /* Re-insert at correct position */
+            uint32_t h = ht_hash(saved.ptr);
+            uint32_t j;
+            for (j = 0; j < HT_SIZE; j++) {
+                uint32_t idx = (h + j) & HT_MASK;
+                if (gb_htable[idx].ptr == HT_EMPTY) {
+                    gb_htable[idx] = saved;
+                    break;
+                }
+            }
+        }
+    }
+
+    InterlockedExchange(&gb_tombstone_count, 0);
+
+    for (i = HT_LOCKS; i > 0; i--)
+        LeaveCriticalSection(&ht_locks[i - 1]);
+
+    gb_log("hash table reclaimed %ld tombstones", reclaimed);
 }
 
 /* ================================================================== */
