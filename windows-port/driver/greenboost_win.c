@@ -1425,9 +1425,6 @@ NTSTATUS GbEvtDeviceAdd(
                                         NULL,              /* EvtFileCreate */
                                         NULL,              /* EvtFileClose */
                                         GbEvtFileCleanup); /* EvtFileCleanup */
-            WdfDeviceInitSetFileObjectConfig(DeviceInit,
-                                             &fileConfig,
-                                             WDF_NO_OBJECT_ATTRIBUTES);
 
             /* Attach GB_FILE_CONTEXT to each WDFFILEOBJECT */
             WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&fileAttrs, GB_FILE_CONTEXT);
@@ -1563,4 +1560,5 @@ NTSTATUS DriverEntry(
 
     return STATUS_SUCCESS;
 }
+
 
