@@ -2,6 +2,86 @@
 
 ## Driver Issues
 
+### "Cannot find any service with service name 'GreenBoost'" / "Service didn't find" (Issue #10)
+
+This is the most common install failure. The installer ran and printed
+"Installation Complete" (in older versions before the v2.3.1 fix), but after
+a reboot `Restart-Service GreenBoost` or `sc query GreenBoost` reports the
+service does not exist.
+
+**Root cause**: `devcon install` did not register the driver service. The
+99% case is that **test-signing is not enabled** in the Boot Configuration
+Database. The driver is test-signed; Windows refuses to load a test-signed
+driver unless the OS is in test-signing mode.
+
+**Diagnose**:
+
+```powershell
+# Is test-signing on?
+bcdedit /enum "{current}" | findstr testsigning
+# Expected on a working install:  testsigning             Yes
+```
+
+If you see `testsigning             No` (or no `testsigning` line at all),
+that's the cause.
+
+**Fix**:
+
+```powershell
+# Run in an elevated PowerShell:
+bcdedit /set testsigning on
+
+# Reboot.
+# After reboot you should see a "Test Mode" watermark in the bottom-right.
+# That's correct — it means test-signed drivers can now load.
+
+# Then re-run the installer:
+cd <repo>\windows-port\tools
+.\install.ps1
+```
+
+If test-signing is ALREADY on and the service still doesn't register, run
+through this checklist in order:
+
+1. **Re-sign the driver.** The INF may have lost its signature info.
+   ```powershell
+   .\sign.ps1
+   ```
+
+2. **Confirm KMDF coinstaller is present.** Look for `WdfCoInstaller01011.dll`
+   (or similar version) in the same folder as `greenboost_win.sys`. If
+   missing, install the Windows Driver Kit (WDK) — it ships the coinstaller.
+
+3. **Trust the test certificate.** The first time a test-signed driver loads
+   on a clean machine, the cert root may not be trusted yet.
+   ```powershell
+   # Inspect cert with:
+   Get-AuthenticodeSignature outputs\greenboost_win.sys | Format-List
+   # If the certificate's Subject isn't in Trusted Root, import via certmgr.msc
+   # Local Computer → Trusted Root Certification Authorities → Certificates → Import
+   ```
+
+4. **Try Disable Driver Signature Enforcement (DSE) from boot menu** for a
+   one-time test:
+   ```
+   Shift + Restart → Troubleshoot → Advanced options → Startup Settings
+   → Restart → press 7 (Disable driver signature enforcement)
+   ```
+   This boots Windows in a mode that will load the driver. If the service
+   appears in this mode, the issue is definitely signature trust.
+
+5. **Check Event Viewer** for driver-load failures:
+   ```
+   Event Viewer → Windows Logs → System
+   Source: "Service Control Manager" or "Kernel-PnP"
+   Look for entries near the timestamp of the failed install.
+   ```
+
+The installer in v2.3.1+ surfaces this diagnosis automatically and refuses
+to print "Installation Complete" when the service doesn't register.
+
+---
+
 ### "Device not found" / CreateFile fails
 
 1. Check if driver service is registered:

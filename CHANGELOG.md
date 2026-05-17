@@ -4,11 +4,31 @@ All notable changes to the GreenBoost Windows port.
 
 ## [Unreleased]
 
+### Fixed — Install script silent-failure (issue #10)
+- `tools/install.ps1` previously returned `$true` from `Install-GreenBoostDriver`
+  even when devcon failed and the service didn't register. Combined with the
+  main-flow only printing a warning when the driver phase failed, the installer
+  printed "Installation Complete" even on a non-functional install. Users
+  rebooted and hit `Restart-Service GreenBoost` → "Cannot find any service with
+  service name 'GreenBoost'" with no diagnosis. Fixed three places:
+  1. After devcon, verify the service actually exists. If not, surface the
+     most likely cause (test-signing off in BCD) with the exact `bcdedit`
+     incantation, and **return `$false`**.
+  2. Distinguish "service registered, device pending enumeration (reboot)"
+     from "service never registered (hard failure)". Only the latter aborts.
+  3. Main flow now tracks `$driverOk` / `$shimOk` and **exits non-zero**
+     when either phase failed (unless `-Force`). Final banner tells the truth.
+- `windows-port/TROUBLESHOOTING.md`: added top-level "Service didn't find"
+  section with full diagnostic checklist (test-signing → resign → KMDF
+  coinstaller → cert trust → DSE bypass → Event Viewer).
+
 ### Planned
 - Phase 2: Explicit VRAM staging with MADVISE-driven promotion/eviction (if UVM heuristics prove insufficient)
 - Phase 3: cuMemCreate/cuMemMap virtual memory API for sub-allocation granularity
 - Driver Verifier hardening pass
 - Multi-GPU device selection support
+- Sync with upstream `gitlab.com/IsolatedOctopi/greenboost` (renamed from `nvidia_greenboost`, new features added — see issue #9)
+- Ship test-signed pre-compiled binaries via GitHub Releases (issue #9)
 
 ---
 
