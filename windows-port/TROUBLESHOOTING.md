@@ -104,9 +104,13 @@ to print "Installation Complete" when the service doesn't register.
 
 ### "Access denied" opening device
 
-- The driver's SDDL allows Everyone read/write access. If access is still denied:
-  - Run your application as Administrator
-  - Check if security software is blocking device access
+- The driver does not grant World/Everyone access. Its device SDDL grants:
+  - Local System: generic all
+  - Built-in Administrators: generic all
+  - Interactive Users: generic read/write
+- If access is still denied:
+  - Run the application from an interactive user session or as Administrator.
+  - Check if security software is blocking device access.
 
 ### BSOD on driver load
 
@@ -161,11 +165,15 @@ bcdedit /enum "{current}" | findstr testsigning
    }
    ```
 
-### "MapViewOfFile failed"
+### Driver-backed allocation mapping fails
 
-- Section handle from driver may be invalid
-- Check driver debug output: `dbgview.exe` (Sysinternals DebugView)
-- Ensure driver is running and accepting IOCTLs
+- The current shim path does not use `MapViewOfFile`.
+- The driver maps pinned pages into the calling process with
+  `MmMapLockedPagesSpecifyCache`, then the shim registers that host pointer
+  with CUDA.
+- If driver-backed allocation fails, check driver debug output with
+  `dbgview.exe` (Sysinternals DebugView) and confirm the driver is running and
+  accepting IOCTLs.
 
 ### CUDA app crashes on startup
 
