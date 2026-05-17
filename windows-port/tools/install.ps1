@@ -157,6 +157,139 @@ function Set-GreenBoostConfig {
     Write-Status "Registry configuration written to $RegPath and $ShimRegPath"
 }
 
+function New-GreenBoostDriverInstallState {
+    param(
+        [string]$State,
+        [bool]$ServiceExists = $false,
+        [bool]$ServiceRunning = $false,
+        [bool]$DeviceAccessible = $false,
+        [object]$TestSigning = $null,
+        [object]$DevconExit = $null,
+        [string]$Detail = ""
+    )
+
+    return [PSCustomObject]@{
+        state             = $State
+        service_exists    = $ServiceExists
+        service_running   = $ServiceRunning
+        device_accessible = $DeviceAccessible
+        test_signing      = $TestSigning
+        devcon_exit       = $DevconExit
+        detail            = $Detail
+    }
+}
+
+function Test-GreenBoostDriverInstallState {
+    param(
+        [string]$ServiceName = $DriverName,
+        [string]$DevicePath = "\\.\GreenBoost"
+    )
+
+    $bcdOutput = & bcdedit /enum "{current}" 2>$null
+    $testSigningOn = ($bcdOutput -match "testsigning\s+Yes")
+
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if (-not $svc) {
+        $detail = "Service '$ServiceName' does not exist after driver installation."
+        if (-not $testSigningOn) {
+            $detail = "Service '$ServiceName' does not exist; test signing is not enabled."
+        }
+        return New-GreenBoostDriverInstallState -State "Failed" -TestSigning $testSigningOn -Detail $detail
+    }
+
+    if ($svc.Status -ne "Running") {
+        try {
+            Start-Service -Name $ServiceName -ErrorAction Stop
+            $svc.Refresh()
+        } catch {
+            return New-GreenBoostDriverInstallState `
+                -State "PendingReboot" `
+                -ServiceExists $true `
+                -TestSigning $testSigningOn `
+                -Detail "Service '$ServiceName' exists but could not start yet: $_"
+        }
+    }
+
+    $serviceRunning = ($svc.Status -eq "Running")
+    if (-not $serviceRunning) {
+        return New-GreenBoostDriverInstallState `
+            -State "PendingReboot" `
+            -ServiceExists $true `
+            -TestSigning $testSigningOn `
+            -Detail "Service '$ServiceName' exists but is $($svc.Status); reboot may be required."
+    }
+
+    try {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class GbDevCheck {
+    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+    static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess,
+        uint dwShareMode, IntPtr lpSecurityAttributes, uint dwCreationDisposition,
+        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr hObject);
+    public static bool TestOpen(string path) {
+        IntPtr h = CreateFile(path, 0xC0000000, 0, IntPtr.Zero, 3, 0x80, IntPtr.Zero);
+        if (h != (IntPtr)(-1)) { CloseHandle(h); return true; }
+        return false;
+    }
+}
+"@ -Language CSharp -ErrorAction SilentlyContinue
+        $deviceAccessible = [GbDevCheck]::TestOpen($DevicePath)
+    } catch {
+        return New-GreenBoostDriverInstallState `
+            -State "PendingReboot" `
+            -ServiceExists $true `
+            -ServiceRunning $true `
+            -TestSigning $testSigningOn `
+            -Detail "Could not verify device accessibility: $_"
+    }
+
+    if ($deviceAccessible) {
+        return New-GreenBoostDriverInstallState `
+            -State "Ready" `
+            -ServiceExists $true `
+            -ServiceRunning $true `
+            -DeviceAccessible $true `
+            -TestSigning $testSigningOn `
+            -Detail "Service is running and $DevicePath is accessible."
+    }
+
+    return New-GreenBoostDriverInstallState `
+        -State "PendingReboot" `
+        -ServiceExists $true `
+        -ServiceRunning $true `
+        -TestSigning $testSigningOn `
+        -Detail "Service is running but $DevicePath is not accessible yet."
+}
+
+function Write-GreenBoostDriverInstallState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$InstallState
+    )
+
+    Write-Status "Driver install state: $($InstallState.state)"
+    Write-Status "  service_exists    : $($InstallState.service_exists)"
+    Write-Status "  service_running   : $($InstallState.service_running)"
+    Write-Status "  device_accessible : $($InstallState.device_accessible)"
+    Write-Status "  test_signing      : $($InstallState.test_signing)"
+    if ($null -ne $InstallState.devcon_exit) {
+        Write-Status "  devcon_exit       : $($InstallState.devcon_exit)"
+    }
+    if ($InstallState.detail) {
+        if ($InstallState.state -eq "Failed") {
+            Write-Err $InstallState.detail
+        } elseif ($InstallState.state -eq "PendingReboot") {
+            Write-Warn $InstallState.detail
+        } else {
+            Write-Status $InstallState.detail
+        }
+    }
+}
+
 function Install-GreenBoostDriver {
     $sysPath = Join-Path $outputsDir $DriverSys
     $infPath = Join-Path $outputsDir $DriverInf
@@ -166,12 +299,12 @@ function Install-GreenBoostDriver {
     if (-not (Test-Path $sysPath)) {
         Write-Err "Driver SYS not found: $sysPath"
         Write-Err "Please run build.ps1 first to generate outputs."
-        return $false
+        return New-GreenBoostDriverInstallState -State "Failed" -Detail "Driver SYS not found: $sysPath"
     }
 
     if (-not (Test-Path $infPath)) {
         Write-Err "Driver INF not found: $infPath"
-        return $false
+        return New-GreenBoostDriverInstallState -State "Failed" -Detail "Driver INF not found: $infPath"
     }
 
     Write-Status "  SYS: $sysPath"
@@ -185,7 +318,7 @@ function Install-GreenBoostDriver {
         Write-Warn "  bcdedit /set testsigning on"
         Write-Warn "  (reboot required)"
         if (-not $Force) {
-            return $false
+            return New-GreenBoostDriverInstallState -State "Failed" -TestSigning $false -Detail "Test signing is not enabled."
         }
     }
 
@@ -205,11 +338,15 @@ function Install-GreenBoostDriver {
             Start-Sleep -Seconds 1
         } elseif ($svc.Status -eq "Running") {
             Write-Status "Driver already installed and running"
-            return $true
+            $installState = Test-GreenBoostDriverInstallState
+            Write-GreenBoostDriverInstallState -InstallState $installState
+            return $installState
         } elseif ($svc) {
             Start-Service -Name $DriverName -ErrorAction SilentlyContinue
             Write-Status "Driver service started"
-            return $true
+            $installState = Test-GreenBoostDriverInstallState
+            Write-GreenBoostDriverInstallState -InstallState $installState
+            return $installState
         }
     }
 
@@ -223,7 +360,7 @@ function Install-GreenBoostDriver {
             Write-Status "pnputil output: $result"
         } catch {
             Write-Err "Driver installation failed: $_"
-            return $false
+            return New-GreenBoostDriverInstallState -State "Failed" -Detail "pnputil driver installation failed: $_"
         }
         try {
             Start-Service -Name $DriverName -ErrorAction SilentlyContinue
@@ -231,73 +368,83 @@ function Install-GreenBoostDriver {
         } catch {
             Write-Warn "Could not start driver service (may need reboot)"
         }
-        return $true
+        $installState = Test-GreenBoostDriverInstallState
+        Write-GreenBoostDriverInstallState -InstallState $installState
+        return $installState
     }
 
     Write-Status "Found devcon at: $devcon"
     Write-Status "Installing driver with devcon (creates device instance)..."
 
     Push-Location $outputsDir
+    $devconExitCode = 0
     try {
         $result = & $devcon install $DriverInf $DeviceHardwareId 2>&1
+        $devconExitCode = $LASTEXITCODE
         Write-Status "devcon output: $result"
-        
-        if ($LASTEXITCODE -ne 0 -and $result -notmatch "device.*created.*successfully") {
+
+        if ($devconExitCode -ne 0 -and $result -notmatch "device.*created.*successfully") {
             if ($result -match "already exists") {
                 Write-Status "Device already exists, attempting to restart..."
                 & $devcon restart $DeviceHardwareId 2>&1 | Out-Null
+                $devconExitCode = 0  # treat as recovered
             } else {
-                Write-Warn "devcon install returned non-zero, checking if device exists..."
+                Write-Warn "devcon install returned non-zero (exit $devconExitCode); will verify service state below."
             }
+        } else {
+            $devconExitCode = 0  # success path
         }
     } catch {
-        Write-Err "Driver installation failed: $_"
+        Write-Err "Driver installation threw exception: $_"
         Pop-Location
-        return $false
+        return New-GreenBoostDriverInstallState -State "Failed" -DevconExit $devconExitCode -Detail "Driver installation threw exception: $_"
     }
     Pop-Location
 
     Start-Sleep -Milliseconds 500
 
-    $svc = Get-Service -Name $DriverName -ErrorAction SilentlyContinue
-    if ($svc) {
-        if ($svc.Status -ne "Running") {
-            Start-Service -Name $DriverName -ErrorAction SilentlyContinue
+    # Real verification is shared across devcon and pnputil so the installer
+    # reports a state instead of collapsing staged installs into success.
+    $installState = Test-GreenBoostDriverInstallState
+    $installState.devcon_exit = $devconExitCode
+    Write-GreenBoostDriverInstallState -InstallState $installState
+
+    if ($installState.state -eq "Failed" -and -not $installState.service_exists) {
+        Write-Err ""
+        Write-Err "Driver install FAILED: service '$DriverName' does not exist after driver installation."
+        Write-Err "devcon exit code: $devconExitCode"
+        Write-Err ""
+
+        # Diagnose the most common cause: test signing not enabled in BCD
+        if (-not $installState.test_signing) {
+            Write-Err "DIAGNOSIS: Test signing is NOT enabled in BCD."
+            Write-Err "The driver is test-signed and the OS refuses to load it without test-signing mode."
+            Write-Err ""
+            Write-Err "Fix:"
+            Write-Err "  1. Run as Administrator:  bcdedit /set testsigning on"
+            Write-Err "  2. Reboot"
+            Write-Err "  3. Re-run this installer."
+            Write-Err ""
+            Write-Err "After reboot you should see 'Test Mode' watermark in the bottom-right of the desktop."
+        } else {
+            Write-Err "DIAGNOSIS: Test signing IS enabled but the driver still did not register."
+            Write-Err "Likely causes:"
+            Write-Err "  - INF lacks digital signature info (re-run sign.ps1 then re-run installer)"
+            Write-Err "  - KMDF coinstaller missing (install WDK; ensure WdfCoInstaller* DLL is alongside the SYS)"
+            Write-Err "  - Driver Signature Enforcement still on (try Disable DSE from F8 boot menu for testing)"
+            Write-Err "  - Signature root not trusted (certmgr → Local Computer → Trusted Root → import test cert)"
+            Write-Err "See windows-port/TROUBLESHOOTING.md ('Service didn't find' section) for full diagnostic flow."
         }
-        Write-Status "Driver service status: $($svc.Status)"
     }
 
-    Write-Status "Verifying device accessibility..."
-    try {
-        Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public class GbDevCheck {
-    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-    static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess,
-        uint dwShareMode, IntPtr lpSecurityAttributes, uint dwCreationDisposition,
-        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
-    [DllImport("kernel32.dll")]
-    static extern bool CloseHandle(IntPtr hObject);
-    public static bool TestOpen() {
-        IntPtr h = CreateFile("\\\\.\\GreenBoost", 0xC0000000, 0, IntPtr.Zero, 3, 0x80, IntPtr.Zero);
-        if (h != (IntPtr)(-1)) { CloseHandle(h); return true; }
-        return false;
+    if ($installState.state -eq "PendingReboot") {
+        Write-Warn "After reboot, verify with:"
+        Write-Warn "  Get-Service GreenBoost      # should be Running"
+        Write-Warn "  Test-Path \\\\.\\GreenBoost   # should be True (via CreateFile)"
+        Write-Warn "If the device still isn't accessible after reboot, see TROUBLESHOOTING.md."
     }
-}
-"@ -Language CSharp -ErrorAction SilentlyContinue
-        $deviceAccessible = [GbDevCheck]::TestOpen()
-        if ($deviceAccessible) {
-            Write-Status "Device \\.\GreenBoost is accessible!"
-            return $true
-        } else {
-            Write-Warn "Device \\.\GreenBoost not accessible yet (may need reboot)"
-            return $true
-        }
-    } catch {
-        Write-Warn "Could not verify device accessibility"
-        return $true
-    }
+
+    return $installState
 }
 
 function Uninstall-GreenBoostDriver {
@@ -450,24 +597,83 @@ $nvmeGb = Get-NvmeInfo
 
 Set-GreenBoostConfig -PhysicalVramGb $gpu.VramGb -SystemRamGb $ramGb
 
+# Track real success of each phase so the final banner tells the truth.
+$driverState = New-GreenBoostDriverInstallState -State "Ready" -Detail "Driver installation skipped by request."
+$shimOk      = $true
+
 if (-not $SkipDriver) {
-    $driverOk = Install-GreenBoostDriver
-    if (-not $driverOk) {
-        Write-Warn "Driver installation incomplete - shim will still work in passthrough mode"
+    $driverState = Install-GreenBoostDriver
+    if ($driverState.state -eq "Failed") {
+        Write-Err ""
+        Write-Err "=== Driver installation FAILED - install is INCOMPLETE ==="
+        if ($driverState.detail) {
+            Write-Err $driverState.detail
+        }
+        Write-Err "Fix the driver issue surfaced above, then re-run this script."
+        Write-Err "To proceed with shim-only (will NOT extend VRAM beyond physical), pass -Force."
+        if (-not $Force) {
+            exit 2
+        }
+        Write-Warn "Continuing past driver failure because -Force was passed."
+        Write-Warn "Shim will run in passthrough mode only; no VRAM extension will occur."
+        $driverState.state = "ShimOnly"
+        $driverState.detail = "Driver install failed; -Force allowed shim-only passthrough."
     }
 }
 
 if (-not $SkipShim) {
     $shimOk = Install-GreenBoostShim
     if (-not $shimOk) {
-        Write-Warn "Shim installation incomplete"
+        Write-Err "Shim installation failed."
+        if (-not $Force) {
+            exit 3
+        }
     }
 }
 
 Write-Status ""
-Write-Status "=== Installation Complete ==="
-Write-Status "Combined model capacity: $($gpu.VramGb + [math]::Floor($ramGb * 0.8) + 64) GB"
-Write-Status "  T1 GPU VRAM : $($gpu.VramGb) GB"
-Write-Status "  T2 DDR4     : $([math]::Floor($ramGb * 0.8)) GB"
-Write-Status "  T3 NVMe     : 64 GB"
+if (-not $shimOk) {
+    Write-Err ""
+    Write-Err "=== Installation FAILED ==="
+    Write-Err "Driver state: $($driverState.state)    Shim OK: $shimOk"
+    Write-Err "DO NOT consider this install ready for use. Resolve the errors and re-run."
+    exit 1
+}
 
+switch ($driverState.state) {
+    "Ready" {
+        Write-Status "=== Installation Complete ==="
+        Write-Status "Combined model capacity: $($gpu.VramGb + [math]::Floor($ramGb * 0.8) + 64) GB"
+        Write-Status "  T1 GPU VRAM : $($gpu.VramGb) GB"
+        Write-Status "  T2 DDR4     : $([math]::Floor($ramGb * 0.8)) GB"
+        Write-Status "  T3 NVMe     : 64 GB"
+        Write-Status ""
+        Write-Status "Next: verify with:  Get-Service GreenBoost  (should be Running)"
+    }
+    "PendingReboot" {
+        Write-Warn "=== Installation staged, reboot required ==="
+        if ($driverState.detail) {
+            Write-Warn $driverState.detail
+        }
+        Write-Status "Next: reboot, then verify with:  Get-Service GreenBoost  (should be Running)"
+    }
+    "ShimOnly" {
+        if (-not $Force) {
+            Write-Err "ShimOnly state reached without -Force; refusing to report success."
+            exit 1
+        }
+        Write-Warn "=== Shim-only mode, no VRAM extension ==="
+        if ($driverState.detail) {
+            Write-Warn $driverState.detail
+        }
+        Write-Warn "Driver-backed VRAM extension is unavailable until the driver install is fixed."
+    }
+    default {
+        Write-Err "=== Installation FAILED ==="
+        Write-Err "Driver state: $($driverState.state)"
+        if ($driverState.detail) {
+            Write-Err $driverState.detail
+        }
+        exit 1
+    }
+}
