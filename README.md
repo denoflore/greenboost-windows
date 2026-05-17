@@ -8,6 +8,32 @@ Windows port by [Chris Zuger](https://github.com/denoflore)
 
 ---
 
+## What this is (30-second read)
+
+**Transparent VRAM extension for LLM inference on Windows.** If you've got a 12 or 16 GB NVIDIA card and you want to run a model that doesn't fit, this lets the NVIDIA driver spill weights into system RAM (and optionally NVMe) with zero code changes to your inference app. You load the kernel driver, inject the shim DLL into the process, and your card starts reporting more memory than it physically has.
+
+Under the hood: the shim intercepts `cudaMalloc` calls above a threshold (default 256 MB) and routes them through CUDA Unified Memory. The NVIDIA driver handles page migration between VRAM and RAM transparently — hot weights stay at HBM bandwidth, overflow pays a PCIe round-trip. On older GPUs or configs where UVM is unavailable, there's a kernel-driver fallback that pins DDR pages and registers them with CUDA directly. Either way, the inference engine never knows there's anything funny going on.
+
+This is a Windows port of [Ferran Duarri's original Linux GreenBoost](https://gitlab.com/IsolatedOctopi/nvidia_greenboost). All the architecture credit goes to him. I'm just translating the design to Windows APIs.
+
+---
+
+## ⚠️ Where this is at (read this before installing)
+
+**This is under active development. It works on my machines, but it has not been fully tested across the wild. Treat it as a research-preview, not production-ready software.** That means:
+
+- **Driver is test-signed.** You need `bcdedit /set testsigning on` and a reboot before anything will load. We don't have an EV cert for production signing yet -- that's on the roadmap.
+- **No precompiled binaries shipped yet.** You build from source (VS2022 + WDK + CMake + vcpkg). Issue #9 asks for prebuilt; we're working on it.
+- **Tested with ComfyUI and LM Studio on Win11 24H2 + VS2022 + WDK.** Not yet exercised under heavy multi-process workloads, multi-GPU configs, or Driver Verifier hardening.
+- **The installer just got a real state machine.** Until PR #11 landed (May 17, 2026), the installer could tell you "Installation Complete" even when the driver service didn't actually register. That was Issue #10. It's fixed now -- the installer reports `Ready / PendingReboot / ShimOnly / Failed` truthfully and surfaces test-signing-off as the most common diagnostic. If you hit something else, please open an issue with the install log.
+- **Driver fallback path is PCIe-bound** and significantly slower than UVM. UVM is the recommended hot path for any modern GPU.
+
+Use it on a machine you can rebuild if necessary. Open issues are the best way to surface what's broken for your setup. If you've gotten it working on something specific, that's useful too -- let us know.
+
+We're actively iterating. This isn't abandoned.
+
+---
+
 ## The story
 
 I was scrolling Reddit and saw Ferran Duarri's GreenBoost drop on r/LocalLLaMA. A Linux kernel module that transparently extends your GPU's VRAM with system RAM and NVMe so you can run LLMs that don't fit in your card. No code changes to your inference engine, no manual layer offloading, just load the module and your 12GB card suddenly sees 60+ GB of addressable memory. Clever as hell.
@@ -111,19 +137,35 @@ The full architecture mapping is documented in `windows-port/CC_INSTRUCTIONS.md`
 
 ---
 
-## Status
+## Status (current as of 2026-05-17)
 
-**Audited and hardened.** A full codebase audit (March 2026) identified and resolved 20 issues across the driver, shim, build pipeline, and tooling -- including 4 critical integration bugs where the shim and driver disagreed on registry paths, event namespaces, and memory accounting. The driver now includes process crash cleanup (no more leaked pinned memory on shim death), honest eviction accounting, and tightened device security. The shim correctly reads configured values, receives pressure notifications, and hooks all critical CUDA allocation paths. See `CHANGELOG.md` for the full breakdown.
+**Active development. Research-preview, not production-ready.**
 
-The driver and shim have been compiled on Win11 + VS2022 + WDK and tested with dynamic injection into Python processes (ComfyUI). Build automation scripts are included. The UVM allocation path is implemented and the test suite passes.
+A full audit in March 2026 identified and resolved 20 issues across the driver, shim, build pipeline, and tooling -- 4 of those were critical integration bugs where the shim and driver disagreed on registry paths, event namespaces, and memory accounting. The driver got process crash cleanup (no more leaked pinned memory if the shim dies), honest eviction accounting, and tightened device security (Local System + Built-in Admins + Interactive Users, not Everyone). The shim hooks all the critical CUDA allocation paths.
+
+Mid-May 2026 found two more silent-failure bugs in `install.ps1` -- the installer was lying about success when the driver service didn't actually register (Issue #10). That got rebuilt as a real state machine: `Ready / PendingReboot / ShimOnly / Failed`. Both devcon and pnputil install paths now route through the same verifier. The final banner reflects state truthfully. A few stale troubleshooting claims (a wrong SDDL line and a stale `MapViewOfFile` section) got corrected against actual driver source while we were in there.
+
+See `CHANGELOG.md` for the full breakdown.
+
+**What's been tested:**
+- Compiles on Win11 24H2 + VS2022 + WDK with vcpkg-managed Detours
+- Dynamic injection into Python processes (ComfyUI) and LM Studio
+- UVM allocation path with a 6-test validation suite
+- Driver IOCTL surface with a 7-test validation suite
+
+**What hasn't been tested:**
+- End-to-end install on a clean Win11 24H2 box by an outside user (Issue #10 reporter is the natural first verifier of the new state machine; reports welcome)
+- Driver Verifier hardening pass
+- Multi-GPU device selection (the data model assumes single GPU today)
+- Long-running multi-process workloads beyond a few hours
 
 Known limitations:
-- Inference speed with the driver fallback path (non-UVM) is significantly slower due to PCIe bandwidth constraints. UVM path recommended for all modern GPUs.
-- Test signing required for driver installation (standard for development).
-- Not yet tested with Driver Verifier for production hardening.
+- Inference speed with the driver fallback path (non-UVM) is significantly slower due to PCIe bandwidth. UVM path is recommended for any modern GPU.
+- Test signing required for driver installation. EV-cert / production-signed binaries are roadmap.
 - Eviction (`GB_IOCTL_EVICT`) is a soft operation: buffers are deprioritized but physical RAM is not reclaimed. True page migration would require unmapping the CUDA-registered VA.
+- No precompiled binaries shipped yet (Issue #9).
 
-Contributions welcome. See open issues for areas that could use help.
+Contributions welcome. Open issues are the best way to surface what's broken on your setup.
 
 ---
 
