@@ -32,11 +32,32 @@ jobs:
       - name: Check packaged launcher without a GPU
         shell: pwsh
         run: |
-          $zip = 'windows-port/tools/outputs/GreenBoost-Windows-2.4.0-beta.2-x64.zip'
+          $zip = 'windows-port/tools/outputs/GreenBoost-Windows-2.4.0-beta.3-x64.zip'
           $folder = Join-Path $env:RUNNER_TEMP 'greenboost-smoke'
           Expand-Archive -LiteralPath $zip -DestinationPath $folder
           & "$folder/greenboost.exe" --help
           if ($LASTEXITCODE) { throw 'Launcher help failed' }
           & "$folder/greenboost.exe" "$folder/does-not-exist.exe"
           if ($LASTEXITCODE -eq 0) { throw 'Missing application incorrectly succeeded' }
+          foreach ($name in @('install_llama.ps1','run_llama.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile("$folder/$name", [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) { throw "$name has parse errors: $errors" }
+          }
+          $refused = $false
+          try { & "$folder/install_llama.ps1" -Destination $folder }
+          catch {
+            if ($_.Exception.Message -notlike 'Destination already exists:*') { throw }
+            $refused = $true
+          }
+          if (!$refused -or !(Test-Path "$folder/greenboost.exe")) { throw 'Installer failed to preserve an existing installation' }
+          # PowerShell 5.1 -File must resolve defaults in the script body. This
+          # runner has no installed backend, so the expected error names its path.
+          $pathError = Join-Path $env:RUNNER_TEMP 'llama-default-path.txt'
+          & powershell.exe -NoProfile -File "$folder/run_llama.ps1" -ListDevices 2> $pathError
+          if ($LASTEXITCODE -eq 0) { throw 'Missing backend incorrectly succeeded' }
+          if ((Get-Content $pathError -Raw) -notmatch 'backends.*llama-b12019-cuda13.4') {
+            throw 'PowerShell 5.1 did not resolve the default backend path'
+          }
           exit 0

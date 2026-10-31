@@ -6,11 +6,11 @@ GreenBoost redirects large CUDA allocations to NVIDIA managed memory so supporte
 
 **The portable Windows beta includes a launcher and DLL. No GreenBoost kernel driver, administrator access, WDK or test-signing mode is required.**
 
-[Download beta 2](https://github.com/denoflore/greenboost-windows/releases/tag/v2.4.0-beta.2) | [CUDA compatibility](windows-port/COMPATIBILITY.md) | [Build](windows-port/BUILDING.md) | [Troubleshooting](windows-port/TROUBLESHOOTING.md)
+[Download beta 3](https://github.com/denoflore/greenboost-windows/releases/tag/v2.4.0-beta.3) | [RTX kernels](windows-port/RTX_KERNELS.md) | [CUDA compatibility](windows-port/COMPATIBILITY.md) | [Build](windows-port/BUILDING.md) | [Troubleshooting](windows-port/TROUBLESHOOTING.md)
 
 ## Download and run
 
-1. Open [Releases](https://github.com/denoflore/greenboost-windows/releases) and download `GreenBoost-Windows-2.4.0-beta.2-x64.zip`.
+1. Open [Releases](https://github.com/denoflore/greenboost-windows/releases) and download `GreenBoost-Windows-2.4.0-beta.3-x64.zip`.
 2. Extract it to a local folder. Keep `greenboost.exe` and `greenboost_cuda.dll` together.
 3. Start a fresh instance of your CUDA application through the launcher:
 
@@ -29,6 +29,20 @@ For a quick GPU check, run this from the extracted folder. Change `0` if needed 
 ```
 
 It allocates 512 MiB through the shim, runs a GPU write, reads the final scalar and frees the allocation. It must finish with `PASS`; a larger displayed memory total alone is not evidence that interception works.
+
+## Updated RTX inference kernels
+
+Beta 3 adds an optional installer for official **llama.cpp b12019**, including October's fused feed-forward kernels, CUDA graph launch improvements and Flash Attention race fix. From the extracted package:
+
+```powershell
+.\install_llama.ps1
+.\run_llama.ps1 -ListDevices
+.\run_llama.ps1 -Model "D:\models\model.gguf" -Gpu 0
+```
+
+The default CUDA 13.4 backend contains native RTX 3000, 4000 and 5000 kernels. `install_llama.ps1 -Cuda 12.4` provides the same updated source with an older runtime option, including RTX 2000 code. RTX 20 hardware execution remains untested. The installer downloads into a separate folder and preserves existing applications and system drivers.
+
+The launch profile uses one CUDA GPU, Flash Attention and greedy GPU sampling. To measure your own model, add `-Mode Benchmark`. Local Qwen3.5 4B comparisons showed essentially unchanged performance on RTX 3060/4090 and a small observed improvement on RTX 5090. See [GPU choices, commands, exact measurements and limits](windows-port/RTX_KERNELS.md). These are application kernels; existing Ollama and LM Studio installations retain their own backends.
 
 ## CUDA compatibility
 

@@ -57,10 +57,11 @@ try {
     Copy-Item -LiteralPath (Join-Path $source '..\LICENSE') -Destination (Join-Path $output 'LICENSE') -Force
     Copy-Item -LiteralPath (Join-Path $source 'README.md'),(Join-Path $source 'VALIDATION.md'),(Join-Path $source 'COMPATIBILITY.md'),(Join-Path $source 'licenses\Detours.txt') -Destination $output -Force
     Copy-Item -LiteralPath (Join-Path $source 'tests\test_compatibility.ps1') -Destination $output -Force
+    Copy-Item -LiteralPath (Join-Path $source 'tools\install_llama.ps1'),(Join-Path $source 'tools\run_llama.ps1'),(Join-Path $source 'RTX_KERNELS.md') -Destination $output -Force
     if ($Package) {
-        $files = @('greenboost.exe','greenboost_cuda.dll','test_cuda.exe','test_runtime.exe','test_lookup.exe','test_compatibility.ps1','LICENSE','README.md','VALIDATION.md','COMPATIBILITY.md','Detours.txt') |
+        $files = @('greenboost.exe','greenboost_cuda.dll','test_cuda.exe','test_runtime.exe','test_lookup.exe','test_compatibility.ps1','install_llama.ps1','run_llama.ps1','RTX_KERNELS.md','LICENSE','README.md','VALIDATION.md','COMPATIBILITY.md','Detours.txt') |
             ForEach-Object { Join-Path $output $_ }
-        $archive = Join-Path $output 'GreenBoost-Windows-2.4.0-beta.2-x64.zip'
+        $archive = Join-Path $output 'GreenBoost-Windows-2.4.0-beta.3-x64.zip'
         Compress-Archive -LiteralPath $files -DestinationPath $archive -Force
         Write-Host "Package: $archive"
     }

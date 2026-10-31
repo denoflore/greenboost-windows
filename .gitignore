@@ -51,6 +51,7 @@ driver/build/
 
 # Generated outputs (collected by build.ps1)
 windows-port/tools/outputs/
+windows-port/tools/backends/
 
 # Test signing certificates (DO NOT COMMIT)
 *.pfx
