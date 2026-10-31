@@ -49,17 +49,18 @@ try {
     & $cmakePath --build $build --config $Config
     if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE)." }
     New-Item -ItemType Directory -Path $output -Force | Out-Null
-    foreach ($relative in @("shim\$Config\greenboost_cuda.dll","$Config\greenboost.exe","tests\$Config\test_cuda.exe")) {
+    foreach ($relative in @("shim\$Config\greenboost_cuda.dll","$Config\greenboost.exe","tests\$Config\test_cuda.exe","tests\$Config\test_runtime.exe","tests\$Config\test_lookup.exe")) {
         $file = Join-Path $build $relative
         if (!(Test-Path -LiteralPath $file)) { throw "Required output is missing: $file" }
         Copy-Item -LiteralPath $file -Destination $output -Force
     }
     Copy-Item -LiteralPath (Join-Path $source '..\LICENSE') -Destination (Join-Path $output 'LICENSE') -Force
-    Copy-Item -LiteralPath (Join-Path $source 'README.md'),(Join-Path $source 'VALIDATION.md'),(Join-Path $source 'licenses\Detours.txt') -Destination $output -Force
+    Copy-Item -LiteralPath (Join-Path $source 'README.md'),(Join-Path $source 'VALIDATION.md'),(Join-Path $source 'COMPATIBILITY.md'),(Join-Path $source 'licenses\Detours.txt') -Destination $output -Force
+    Copy-Item -LiteralPath (Join-Path $source 'tests\test_compatibility.ps1') -Destination $output -Force
     if ($Package) {
-        $files = @('greenboost.exe','greenboost_cuda.dll','test_cuda.exe','LICENSE','README.md','VALIDATION.md','Detours.txt') |
+        $files = @('greenboost.exe','greenboost_cuda.dll','test_cuda.exe','test_runtime.exe','test_lookup.exe','test_compatibility.ps1','LICENSE','README.md','VALIDATION.md','COMPATIBILITY.md','Detours.txt') |
             ForEach-Object { Join-Path $output $_ }
-        $archive = Join-Path $output 'GreenBoost-Windows-2.4.0-beta.1-x64.zip'
+        $archive = Join-Path $output 'GreenBoost-Windows-2.4.0-beta.2-x64.zip'
         Compress-Archive -LiteralPath $files -DestinationPath $archive -Force
         Write-Host "Package: $archive"
     }

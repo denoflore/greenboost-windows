@@ -2,6 +2,14 @@
 
 Date: October 31, 2026. NVIDIA driver: 610.88. Scope: isolated Windows x64 processes on one workstation, not a production deployment or a cross-hardware compatibility claim.
 
+## Beta 2 compatibility checks
+
+The [runtime matrix](COMPATIBILITY.md) adds CUDA 11.8, 12.0, 12.4, 12.9, 13.0, 13.1, 13.3 and 13.4 from Toolkit 13.4.3. All 32 runtime cases passed: native allocation, extension, below-threshold allocation and extension disabled, each with GPU memset, scalar readback and free. Actual process/device identifiers and observed GPU utilisation are recorded in that document. The shim implementation was unchanged from beta 1.
+
+The final extracted package also passed the four CUDA 13.4 cases on an RTX 5090 from a path containing spaces, bringing the total to 36 successful runtime cases. This qualifies that additional combination; it does not extend every matrix row to every GPU.
+
+`test_lookup` passed 34 real-driver comparisons covering both resolver ABIs, recursive lookup, stream flags, old/invalid versions, unknown symbols and unchanged APIs outside the extension. Beta 2 packages `test_runtime`, `test_lookup`, `test_compatibility.ps1` and `COMPATIBILITY.md` so these checks can be repeated with an application's own runtime.
+
 ## Observed cases
 
 | Case | Before | Candidate |
@@ -22,7 +30,7 @@ The llama.cpp check used a model that fits physical VRAM. It establishes applica
 
 The extracted static-runtime ZIP was also tested from a directory containing spaces. Its driver probe PID 40884 and CUDA 13.3 runtime probe PID 51036 passed. The final llama.cpp process PID 52568 used CUDA_VISIBLE_DEVICES=4, with tensor override `.*=CUDA0`, all 33 layers on CUDA, normal CUDA graph settings, pp32/tg8 and one repetition. Its RTX 3060 GPU samples reached 64%; no CPU model buffer was reported. This is a bounded functional run, not a comparative benchmark.
 
-The portable launcher imports KERNEL32.dll; the shim imports KERNEL32.dll and ADVAPI32.dll. NVIDIA application libraries are supplied by the application. The built package contains the launcher, shim, GPU probe and four documentation/licence files.
+The portable launcher imports KERNEL32.dll; the shim imports KERNEL32.dll and ADVAPI32.dll. NVIDIA application libraries are supplied by the application. Beta 2 contains the launcher, shim, three probes, the compatibility script and five documentation/licence files.
 
 ## Reproduce
 

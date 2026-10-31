@@ -6,9 +6,11 @@ GreenBoost redirects large CUDA allocations to NVIDIA managed memory so supporte
 
 **The portable Windows beta includes a launcher and DLL. No GreenBoost kernel driver, administrator access, WDK or test-signing mode is required.**
 
+[Download beta 2](https://github.com/denoflore/greenboost-windows/releases/tag/v2.4.0-beta.2) | [CUDA compatibility](windows-port/COMPATIBILITY.md) | [Build](windows-port/BUILDING.md) | [Troubleshooting](windows-port/TROUBLESHOOTING.md)
+
 ## Download and run
 
-1. Open [Releases](https://github.com/denoflore/greenboost-windows/releases) and download `GreenBoost-Windows-2.4.0-beta.1-x64.zip`.
+1. Open [Releases](https://github.com/denoflore/greenboost-windows/releases) and download `GreenBoost-Windows-2.4.0-beta.2-x64.zip`.
 2. Extract it to a local folder. Keep `greenboost.exe` and `greenboost_cuda.dll` together.
 3. Start a fresh instance of your CUDA application through the launcher:
 
@@ -27,6 +29,27 @@ For a quick GPU check, run this from the extracted folder. Change `0` if needed 
 ```
 
 It allocates 512 MiB through the shim, runs a GPU write, reads the final scalar and frees the allocation. It must finish with `PASS`; a larger displayed memory total alone is not evidence that interception works.
+
+## CUDA compatibility
+
+GreenBoost uses the installed NVIDIA driver and the application's own CUDA runtime. It does not replace your runtime, install a driver or require a particular CUDA Toolkit to build the shim.
+
+| Runtime versions checked | Result on Windows 11, RTX 3060, NVIDIA 610.88 |
+| --- | --- |
+| CUDA 11.8 | Native, extended, below-threshold and extension-disabled cases pass |
+| CUDA 12.0, 12.4 and 12.9 | All four cases pass for each runtime |
+| CUDA 13.0, 13.1 and 13.3 | All four cases pass for each runtime |
+| CUDA 13.4 from Toolkit 13.4.3 | All four cases pass, including real GPU writes and readback |
+
+These checks cover synchronous memory interception across eight actual runtime DLLs. They establish older-runtime compatibility on the tested current driver. CUDA 13.4 also passed all four cases on an RTX 5090 using the extracted beta 2 package. Other driver/runtime/GPU combinations remain unverified. New CUDA features can require a newer driver even when these memory operations work. See the [compatibility details and NVIDIA references](windows-port/COMPATIBILITY.md) before choosing an application build.
+
+The package includes `test_compatibility.ps1` to check your application's runtime in fresh processes:
+
+```powershell
+.\test_compatibility.ps1 -RuntimePath "C:\my-app\cudart64_13.dll" -Device 0
+```
+
+Use the actual runtime DLL supplied by your application. The script tests native allocation, GreenBoost extension, a small allocation and extension disabled, then restores its process environment settings. It needs at least 512 MiB of free GPU memory and sufficient free RAM above the 8 GiB reserve. NVIDIA runtime DLLs are not bundled.
 
 ## Configuration
 
@@ -52,7 +75,7 @@ Existing registry threshold/debug/RAM-cap settings are read for compatibility. E
 ## What this beta supports
 
 - Synchronous CUDA driver allocation/free and capacity queries, including runtime entry-point lookup through `cuGetProcAddress` and its CUDA 12+ ABI.
-- CUDA runtimes that obtain those driver entry points, including the tested CUDA 12.4 llama.cpp build and CUDA 13.3 runtime.
+- CUDA runtimes that obtain those driver entry points, including the verified versions in the compatibility table and the CUDA 12.4 llama.cpp build.
 - Child processes created through Windows `CreateProcessA` and `CreateProcessW`.
 - NVIDIA's physical memory telemetry remains unchanged in NVML and `nvidia-smi`.
 

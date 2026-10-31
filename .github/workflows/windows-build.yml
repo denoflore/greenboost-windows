@@ -32,7 +32,7 @@ jobs:
       - name: Check packaged launcher without a GPU
         shell: pwsh
         run: |
-          $zip = 'windows-port/tools/outputs/GreenBoost-Windows-2.4.0-beta.1-x64.zip'
+          $zip = 'windows-port/tools/outputs/GreenBoost-Windows-2.4.0-beta.2-x64.zip'
           $folder = Join-Path $env:RUNNER_TEMP 'greenboost-smoke'
           Expand-Archive -LiteralPath $zip -DestinationPath $folder
           & "$folder/greenboost.exe" --help
