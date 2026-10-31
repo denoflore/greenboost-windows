@@ -11,6 +11,7 @@ add_executable(test_lookup test_lookup.c)
 add_executable(test_child test_child.c)
 add_executable(test_capacity test_capacity.c)
 add_executable(test_free_error test_free_error.c)
+add_executable(test_early_alloc test_early_alloc.c)
 
 target_include_directories(test_ioctl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../driver

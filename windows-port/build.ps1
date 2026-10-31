@@ -8,6 +8,8 @@ param(
     [string]$DetoursRoot,
     [switch]$StaticRuntime,
     [switch]$Package,
+    [switch]$Storage,
+    [string]$CudaRoot,
     [switch]$Clean
 )
 $ErrorActionPreference = 'Stop'
@@ -38,6 +40,8 @@ try {
     }
     $configure = @('-S',$source,'-B',$build,'-A',$Arch)
     $configure += "-DGB_STATIC_RUNTIME=$($StaticRuntime.IsPresent.ToString().ToUpperInvariant())"
+    $configure += "-DGB_BUILD_STORAGE=$($Storage.IsPresent.ToString().ToUpperInvariant())"
+    if ($CudaRoot) { $configure += "-DCUDAToolkit_ROOT=$([IO.Path]::GetFullPath($CudaRoot))" }
     if ($Generator) { $configure += @('-G',$Generator) }
     if (!$DetoursRoot -and $env:VCPKG_ROOT) { $DetoursRoot = Join-Path $env:VCPKG_ROOT 'installed\x64-windows' }
     if ($DetoursRoot) {
@@ -49,7 +53,7 @@ try {
     & $cmakePath --build $build --config $Config
     if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE)." }
     New-Item -ItemType Directory -Path $output -Force | Out-Null
-    foreach ($relative in @("shim\$Config\greenboost_cuda.dll","$Config\greenboost.exe","tests\$Config\test_cuda.exe","tests\$Config\test_runtime.exe","tests\$Config\test_lookup.exe")) {
+    foreach ($relative in @("shim\$Config\greenboost_cuda.dll","$Config\greenboost.exe","$Config\greenboost-info.exe","tests\$Config\test_cuda.exe","tests\$Config\test_runtime.exe","tests\$Config\test_lookup.exe")) {
         $file = Join-Path $build $relative
         if (!(Test-Path -LiteralPath $file)) { throw "Required output is missing: $file" }
         Copy-Item -LiteralPath $file -Destination $output -Force
@@ -58,10 +62,16 @@ try {
     Copy-Item -LiteralPath (Join-Path $source 'README.md'),(Join-Path $source 'VALIDATION.md'),(Join-Path $source 'COMPATIBILITY.md'),(Join-Path $source 'licenses\Detours.txt') -Destination $output -Force
     Copy-Item -LiteralPath (Join-Path $source 'tests\test_compatibility.ps1') -Destination $output -Force
     Copy-Item -LiteralPath (Join-Path $source 'tools\install_llama.ps1'),(Join-Path $source 'tools\run_llama.ps1'),(Join-Path $source 'RTX_KERNELS.md') -Destination $output -Force
+    Copy-Item -LiteralPath (Join-Path $source 'EXPERIMENTAL.md'),(Join-Path $source 'EXPERIMENTAL_RESULTS.json') -Destination $output -Force
+    if ($Storage) {
+        Copy-Item -LiteralPath (Join-Path $build "storage\$Config\greenboost_storage.lib"),(Join-Path $build "storage\$Config\test_storage.exe"),(Join-Path $source 'storage\file_tensor.h') -Destination $output -Force
+    }
     if ($Package) {
-        $files = @('greenboost.exe','greenboost_cuda.dll','test_cuda.exe','test_runtime.exe','test_lookup.exe','test_compatibility.ps1','install_llama.ps1','run_llama.ps1','RTX_KERNELS.md','LICENSE','README.md','VALIDATION.md','COMPATIBILITY.md','Detours.txt') |
-            ForEach-Object { Join-Path $output $_ }
-        $archive = Join-Path $output 'GreenBoost-Windows-2.4.0-beta.3-x64.zip'
+        $names = @('greenboost.exe','greenboost-info.exe','greenboost_cuda.dll','test_cuda.exe','test_runtime.exe','test_lookup.exe','test_compatibility.ps1','install_llama.ps1','run_llama.ps1','RTX_KERNELS.md','EXPERIMENTAL.md','EXPERIMENTAL_RESULTS.json','LICENSE','README.md','VALIDATION.md','COMPATIBILITY.md','Detours.txt')
+        if ($Storage) { $names += @('greenboost_storage.lib','test_storage.exe','file_tensor.h') }
+        $files = $names | ForEach-Object { Join-Path $output $_ }
+        $suffix = if ($Storage) { '-storage' } else { '' }
+        $archive = Join-Path $output "GreenBoost-Windows-2.5.0-experimental$suffix-x64.zip"
         Compress-Archive -LiteralPath $files -DestinationPath $archive -Force
         Write-Host "Package: $archive"
     }

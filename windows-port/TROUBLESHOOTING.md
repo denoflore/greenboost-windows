@@ -2,7 +2,9 @@
 
 **The application still reports physical VRAM.** Start a fresh process through `greenboost.exe`, with `GREENBOOST_DEBUG=1`. An existing background server is unaffected. Check for `UVM alloc` messages and run the supplied GPU test. A memory display alone does not prove interception. NVML and nvidia-smi intentionally retain physical totals.
 
-**No large allocations are intercepted.** The default threshold is 256 MiB per allocation. Memory pools, CUDA virtual-memory APIs and explicit managed allocations are outside the extension. Setting `GREENBOOST_EXTRA_MB=0`, or having no RAM left after the reserve, disables extension.
+**No managed allocations appear.** The experimental default is adaptive: native VRAM is used while it fits. Set `GREENBOOST_DEBUG=1` to see allocation decisions. `GREENBOOST_ALLOC_POLICY=managed` explicitly selects the previous policy. The default threshold is 256 MiB per allocation. Memory pools, CUDA virtual-memory APIs and explicit managed allocations are outside the extension. Setting `GREENBOOST_EXTRA_MB=0`, or having no RAM left after the reserve, disables extension.
+
+**Managed allocations run slowly with several GPUs visible.** Windows managed memory can use system RAM when the visible devices lack compatible peer access. Use the adaptive default or the single GPU profile in `run_llama.ps1`. `greenboost-info.exe` prints actual CUDA ordinals and managed-memory capabilities. See [EXPERIMENTAL.md](EXPERIMENTAL.md) for the measured mixed GPU case and NVIDIA's platform documentation.
 
 **An allocation fails despite a larger displayed total.** The allowance is a planning limit, not reserved memory. Reduce the model/context size or allowance, close competing workloads and check available RAM. Larger Windows managed allocations depend on the NVIDIA driver and GPU. NVMe/pagefile capacity is not added to the allowance.
 
