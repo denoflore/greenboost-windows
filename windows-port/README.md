@@ -1,6 +1,6 @@
 # GreenBoost Windows portable beta
 
-Version: 2.4.0 beta 2. [Download](https://github.com/denoflore/greenboost-windows/releases/tag/v2.4.0-beta.2).
+Version: 2.4.0 beta 3. [Download](https://github.com/denoflore/greenboost-windows/releases/tag/v2.4.0-beta.3).
 
 Keep `greenboost.exe` and `greenboost_cuda.dll` in the same extracted folder.
 
@@ -11,6 +11,17 @@ Keep `greenboost.exe` and `greenboost_cuda.dll` in the same extracted folder.
 This starts a new application with GreenBoost and propagates injection through its x64 CreateProcessA/W children. The launcher waits and returns the application's exit code. It does not attach to an existing background server.
 
 Windows 10/11 x64 and an NVIDIA driver with managed-memory support are required. Your application still needs its normal CUDA libraries. No GreenBoost kernel driver, administrator rights, test-signing mode or CUDA SDK is needed for this package.
+
+## Install current RTX inference kernels
+
+```powershell
+.\install_llama.ps1
+.\run_llama.ps1 -ListDevices
+.\run_llama.ps1 -Model "D:\models\model.gguf" -Gpu 0
+.\run_llama.ps1 -Mode Benchmark -Model "D:\models\model.gguf" -Gpu 0
+```
+
+This installs official llama.cpp b12019 with CUDA 13.4 in a separate folder. The profile selects one CUDA device, Flash Attention and greedy GPU sampling. Use `install_llama.ps1 -Cuda 12.4` for the older runtime option, then pass `-LlamaDirectory .\backends\llama-b12019-cuda12.4` to the launch script. See `RTX_KERNELS.md` for RTX 20/30/40/50 coverage, included upstream fixes and measured results. Existing applications and system drivers are preserved.
 
 ## Check your GPU
 
@@ -26,7 +37,7 @@ Arguments are DLL path, lookup mode (0=export, 1=older resolver, 2=CUDA 12+ reso
 .\test_compatibility.ps1 -RuntimePath "C:\my-app\cudart64_13.dll" -Device 0
 ```
 
-Use your application's actual runtime path; CUDA 11 commonly uses `cudart64_110.dll`, CUDA 12 uses `cudart64_12.dll`, and CUDA 13 uses `cudart64_13.dll`. Keep each runtime with its matching application libraries. GreenBoost does not supply or upgrade NVIDIA libraries.
+Use your application's actual runtime path; CUDA 11 commonly uses `cudart64_110.dll`, CUDA 12 uses `cudart64_12.dll`, and CUDA 13 uses `cudart64_13.dll`. Keep each runtime with its matching application libraries. The core ZIP does not bundle NVIDIA libraries; the optional llama.cpp installer downloads the matching upstream libraries into its isolated application folder.
 
 The script checks native allocation, a 512 MiB extended allocation, an 8 MiB native allocation and disabled extension. Every case performs a GPU write, scalar readback and free in a fresh process. It restores its process environment afterwards. Allow 512 MiB free VRAM and enough free RAM above the 8 GiB reserve.
 
