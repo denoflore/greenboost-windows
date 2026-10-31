@@ -1,6 +1,7 @@
 # GreenBoost Windows 2.5.0 experimental
 
-This development package has not replaced public 2.4.0 beta 3. Keep
+The main branch builds this experimental version. The latest published binary
+package remains 2.4.0 beta 3 and lacks these experimental changes. Keep
 `greenboost.exe` and `greenboost_cuda.dll` together. Windows 10/11 x64 and a
 compatible NVIDIA CUDA driver are required. No GreenBoost kernel driver,
 administrator rights, CUDA SDK or test-signing mode is required to run it.

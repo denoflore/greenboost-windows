@@ -1,8 +1,10 @@
-# GreenBoost experimental branch
+# GreenBoost 2.5.0 experimental
 
-Version 2.5.0 experimental, October 31, 2026. This is an isolated development
-build based on 2.4.0-beta.3. It has not replaced the public release or changed
-installed applications. The branch is `experiment/fuck-it-we-ball-20261031`.
+Version 2.5.0 experimental, October 31, 2026. Developed in the isolated
+`experiment/fuck-it-we-ball-20261031` worktree from 2.4.0-beta.3, this code is
+now part of main. The latest published binary remains 2.4.0-beta.3. Merging
+the source does not update installed applications or qualify the file API
+for inference model use.
 
 ## Memory allocation
 
@@ -244,8 +246,10 @@ passed compressed GPU data verification on the RTX 3060 in PID 26760.
 The packaged benchmark helper also completed on RTX 5060 Ti with q8_0 key/value
 caches, 64 prompt tokens, 32 decode tokens and two repetitions. This verifies
 the benchmark argument path; it is not a before/after performance comparison.
-These are local package checks. No GitHub Actions run or public release was
-created for this experimental branch.
+These are local package checks recorded before publication. Current portable
+build checks are available in
+[GitHub Actions](https://github.com/denoflore/greenboost-windows/actions/workflows/windows-build.yml).
+No 2.5.0 binary release has been published.
 
 ### Causal review boundary
 

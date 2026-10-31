@@ -2,16 +2,20 @@
 
 # GreenBoost for Windows
 
+[![Windows portable build](https://github.com/denoflore/greenboost-windows/actions/workflows/windows-build.yml/badge.svg?branch=main)](https://github.com/denoflore/greenboost-windows/actions/workflows/windows-build.yml)
+
 One CUDA address space, with explicit choices about where the bytes live.
 GreenBoost provides a portable launcher and allocation shim for NVIDIA CUDA
-applications. This branch adds native VRAM allocation first, quantized KV cache
+applications. The current source adds native VRAM allocation first, quantized KV cache
 controls, GPU capability inspection and a developer library for keeping file
 regions at stable CUDA addresses with bounded VRAM residency.
 
-**Version 2.5.0 experimental.** This branch has not replaced the public
-[2.4.0 beta 3 release](https://github.com/denoflore/greenboost-windows/releases/tag/v2.4.0-beta.3).
-Build this experiment from source. No GreenBoost kernel driver, administrator
-access or Windows test-signing mode is required.
+**Main contains 2.5.0 experimental.** Build it from source using the commands
+below. The latest published binary package remains
+[2.4.0 beta 3](https://github.com/denoflore/greenboost-windows/releases/tag/v2.4.0-beta.3),
+which uses the previous allocation policy and does not include the file residency
+API. No GreenBoost kernel driver, administrator access or Windows test-signing
+mode is required.
 
 [Design and results](windows-port/EXPERIMENTAL.md) |
 [Build](windows-port/BUILDING.md) |
@@ -83,6 +87,19 @@ NVML and `nvidia-smi` continue to show physical VRAM.
 `-Context`, `-Batch`, `-MicroBatch`, `-Mode Benchmark` and `-VerboseBackend`.
 The default cache remains f16. Quantized caches reduce memory and can change
 model output. The helper restores its environment settings on exit.
+
+## Tested compatibility
+
+The October 31, 2026 checks passed all five allocation cases across CUDA 11.8,
+12.0, 12.4, 12.9, 13.0, 13.1, 13.3 and 13.4 on an RTX 3060 with NVIDIA 610.88.
+The extracted package passed the same five CUDA 13.4 cases on an RTX 5090,
+for 45 runtime cases in total. Both allocation policies and the file residency
+test also passed on RTX 3060, 3090, 4090, 5060 Ti and 5090.
+
+These are recorded workstation results. GitHub Actions checks the portable
+build and package without a GPU. RTX 2000 hardware, older drivers and long
+production runs remain unverified. See the
+[test conditions and receipts](windows-port/EXPERIMENTAL.md).
 
 ## What was measured
 
