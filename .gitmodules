@@ -1,0 +1,15 @@
+[submodule "libraries/LoRA"]
+	path = libraries/LoRA
+	url = https://github.com/microsoft/LoRA.git
+[submodule "libraries/Model-Optimizer"]
+	path = libraries/Model-Optimizer
+	url = https://github.com/NVIDIA/Model-Optimizer.git
+[submodule "libraries/TensorRT-Edge-LLM"]
+	path = libraries/TensorRT-Edge-LLM
+	url = https://github.com/NVIDIA/TensorRT-Edge-LLM.git
+[submodule "libraries/exllamav3"]
+	path = libraries/exllamav3
+	url = https://github.com/turboderp-org/exllamav3.git
+[submodule "libraries/kvcompress"]
+	path = libraries/kvcompress
+	url = https://github.com/westers/kvcompress.git

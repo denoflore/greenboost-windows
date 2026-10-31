@@ -59,3 +59,4 @@ windows-port/tools/outputs/
 
 # Backup directories
 *_backup/
+.validation/

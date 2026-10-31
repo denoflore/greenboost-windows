@@ -80,6 +80,8 @@ typedef cudaError_t (*pfn_cudaMallocManaged)(void **, size_t, unsigned int);
 typedef cudaError_t (*pfn_cudaMallocAsync)(void **, size_t, cudaStream_t);
 typedef cudaError_t (*pfn_cudaMemGetInfo)(size_t *, size_t *);
 typedef CUresult    (*pfn_cuDeviceTotalMem_v2)(size_t *, CUdevice);
+typedef CUresult    (CUDAAPI *pfn_cuGetProcAddress)(const char *, void **, int, unsigned long long);
+typedef CUresult    (CUDAAPI *pfn_cuGetProcAddress_v2)(const char *, void **, int, unsigned long long, int *);
 
 /* Host registration for mmap+register path */
 typedef CUresult    (*pfn_cuMemHostRegister)(void *, size_t, unsigned int);
