@@ -1,5 +1,9 @@
 # RTX kernels for GreenBoost
 
+This records the beta 3 backend update. The same pinned backend is used by
+2.5.0 experimental, whose allocator and cache comparisons are documented in
+[EXPERIMENTAL.md](EXPERIMENTAL.md).
+
 Updated October 31, 2026. Beta 3 integrates the official Windows x64 **llama.cpp b12019** backend, commit `1052f7e1d`, with a choice of CUDA 13.4 or CUDA 12.4. GreenBoost manages memory; llama.cpp supplies the inference kernels. Updating this backend does not update kernels inside an existing Ollama or LM Studio installation.
 
 ## Install and use

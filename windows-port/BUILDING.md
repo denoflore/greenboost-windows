@@ -25,12 +25,12 @@ Detours' source Makefile uses the static MSVC runtime. `-StaticRuntime` matches 
 
 Outputs go to `windows-port/tools/outputs`:
 
-- `greenboost.exe`
+- `greenboost.exe`, `greenboost-info.exe`
 - `greenboost_cuda.dll`
 - `test_cuda.exe`
 - `test_runtime.exe`, `test_lookup.exe` and `test_compatibility.ps1`
 - Usage, validation and licence files
-- `GreenBoost-Windows-2.4.0-beta.2-x64.zip` when `-Package` is selected
+- `GreenBoost-Windows-2.5.0-experimental-x64.zip` when `-Package` is selected
 
 Only the explicit portable files enter the ZIP. No driver, installer, signing certificate or local configuration is packaged.
 
@@ -59,7 +59,14 @@ cmake --build windows-port/build --config Release
 
 ## Validation
 
-The build includes `test_cuda`, `test_runtime`, `test_lookup`, `test_child`, `test_capacity` and `test_free_error`. CUDA tests require a real NVIDIA GPU and driver. See [VALIDATION.md](VALIDATION.md) for the tested cases and bounds, and [COMPATIBILITY.md](COMPATIBILITY.md) for repeatable runtime checks. The optional historical `test_uvm` target is available when CMake finds the CUDA SDK.
+`-Storage -CudaRoot 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3'`
+also builds the experimental file residency library and its GPU test. This
+optional target requires CUDA SDK headers and the driver import library;
+the ordinary portable build remains SDK independent. It produces the separate
+`GreenBoost-Windows-2.5.0-experimental-storage-x64.zip`. See
+[EXPERIMENTAL.md](EXPERIMENTAL.md) for the API and tested scope.
+
+The build includes `test_cuda`, `test_runtime`, `test_lookup`, `test_child`, `test_capacity`, `test_free_error` and `test_early_alloc`. CUDA tests require a real NVIDIA GPU and driver. See [EXPERIMENTAL.md](EXPERIMENTAL.md) for current tests and [VALIDATION.md](VALIDATION.md) for historical release measurements. The optional historical `test_uvm` target is available when CMake finds the CUDA SDK.
 
 GitHub's Windows build job checks compilation, packaging, help and the launcher's missing-application error. It does not claim GPU validation on a hosted runner.
 

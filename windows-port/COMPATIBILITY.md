@@ -1,5 +1,8 @@
 # CUDA compatibility
 
+Historical beta matrix follows. The experimental branch adds an adaptive
+allocation case; its current measurements are in [EXPERIMENTAL.md](EXPERIMENTAL.md).
+
 Checked October 31, 2026 for GreenBoost Windows 2.4.0 beta 2. The launcher and shim use the same runtime mechanism as beta 1; this update adds compatibility checks, packages the test tools and documents the measured scope.
 
 ## Verified runtime matrix

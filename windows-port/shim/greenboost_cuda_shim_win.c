@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Copyright (C) 2024-2026 Ferran Duarri. Dual-licensed: GPL v2 + Commercial.
  *
- * GreenBoost 2.4 Windows CUDA Shim DLL
+ * GreenBoost 2.5 experimental Windows CUDA Shim DLL
  *
- * Routes large synchronous CUDA allocations through managed memory.
+ * Uses native VRAM first, with an explicit managed-first policy option.
  * Reports real GPU capacity plus a bounded system RAM allowance.
  * The legacy KMDF fallback remains for separately installed driver setups;
  * the portable package does not require or include that driver.
@@ -62,12 +62,14 @@ static pfn_cuMemHostGetDevicePointer real_cuMemHostGetDevicePointer = NULL;
 static HMODULE hCudaDrv = NULL;   /* nvcuda.dll */
 static size_t gb_extra_bytes;
 static size_t gb_reserve_bytes;
+static int gb_managed_first;
+static int gb_legacy_driver;
 static CUresult (*real_cuDeviceGetAttribute)(int *, int, CUdevice);
 
 static size_t gb_extra_for_device(CUdevice device)
 {
     int managed = 0;
-    if (!real_cuDeviceGetAttribute ||
+    if (!real_cuMemAllocManaged_drv || !real_cuDeviceGetAttribute ||
         real_cuDeviceGetAttribute(&managed, 83, device) != CUDA_SUCCESS || !managed)
         return 0;
     return gb_extra_bytes;
@@ -590,65 +592,9 @@ static int gb_free_buffer(CUdeviceptr ptr, CUresult *result)
     return 1;
 }
 
-/* ================================================================== */
-/*  Deferred UVM probe                                                  */
-/*                                                                      */
-/*  MUST NOT run at DLL_PROCESS_ATTACH (gb_shim_init) — no CUDA         */
-/*  context exists yet, so cuMemAllocManaged would fail with            */
-/*  CUDA_ERROR_NOT_INITIALIZED, permanently disabling UVM fallback      */
-/*  even on capable hardware.                                           */
-/*                                                                      */
-/*  Instead, probe once on the first intercepted allocation, where      */
-/*  the calling application has already created a CUDA context.         */
-/* ================================================================== */
-
-static void gb_probe_uvm_once(void)
-{
-    CUdeviceptr probe_ptr = 0;
-    CUresult ret;
-    pfn_cuMemFree_v2 free_fn;
-
-    /* Double-checked locking via Initialized gate + UvmProbed flag */
-    if (gb_config.UvmProbed)
-        return;
-
-    /* Serialize concurrent first-call races */
-    EnterCriticalSection(&ht_locks[0]);
-    if (gb_config.UvmProbed) {
-        LeaveCriticalSection(&ht_locks[0]);
-        return;
-    }
-
-    gb_config.UvmAvailable = FALSE;
-
-    if (!real_cuMemAllocManaged_drv) {
-        gb_log("UVM probe: cuMemAllocManaged not found — UVM unavailable");
-        gb_config.UvmProbed = TRUE;
-        LeaveCriticalSection(&ht_locks[0]);
-        return;
-    }
-
-    /* Tiny probe allocation — 4 bytes, just to test capability */
-    ret = real_cuMemAllocManaged_drv(&probe_ptr, 4, CU_MEM_ATTACH_GLOBAL);
-    if (ret == CUDA_SUCCESS) {
-        gb_config.UvmAvailable = TRUE;
-        gb_log("UVM probe: managed memory available (probe alloc succeeded)");
-
-        /* Clean up the probe allocation */
-        free_fn = real_cuMemFree_v2;
-        if (free_fn)
-            free_fn(probe_ptr);
-    } else {
-        gb_log("UVM probe: cuMemAllocManaged returned %d — UVM unavailable", ret);
-    }
-
-    gb_config.UvmProbed = TRUE;
-    LeaveCriticalSection(&ht_locks[0]);
-}
-
 /*
  * Allocate via CUDA Unified Virtual Memory.
- * The NVIDIA driver manages page migration between VRAM and RAM.
+ * NVIDIA owns placement under the platform's managed-memory capabilities.
  * Returns CUDA_SUCCESS on success, error code on failure.
  */
 static CUresult gb_alloc_uvm(void **devPtr, size_t size)
@@ -705,27 +651,50 @@ static CUresult gb_alloc_uvm(void **devPtr, size_t size)
 
 static CUresult CUDAAPI hooked_cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
 {
-    if (!gb_config.UvmProbed)
-        gb_probe_uvm_once();
+    CUresult ret;
+    CUdevice device;
+    void *ptr = NULL;
+    if (!gb_config.Initialized || !dptr || !gb_extra_bytes ||
+        bytesize < gb_config.ThresholdBytes)
+        return real_cuMemAlloc_v2(dptr, bytesize);
 
-    if (dptr && gb_extra_bytes && bytesize >= gb_config.ThresholdBytes && gb_config.Initialized) {
-        void *ptr = NULL;
-        if (gb_config.UvmAvailable) {
-            CUresult ret = gb_alloc_uvm(&ptr, bytesize);
-            if (ret == CUDA_SUCCESS) {
-                *dptr = (CUdeviceptr)(uintptr_t)ptr;
-                return CUDA_SUCCESS;
-            }
+    /* Preserve native allocation semantics and bandwidth when it fits.
+     * Only capacity failure permits a second memory path. In particular,
+     * pending CUDA errors and invalid contexts must reach the application. */
+    if (!gb_managed_first) {
+        ret = real_cuMemAlloc_v2(dptr, bytesize);
+        if (ret != CUDA_ERROR_OUT_OF_MEMORY) {
+            if (ret == CUDA_SUCCESS)
+                gb_log("native alloc: %zuMB -> ptr %p", bytesize >> 20,
+                       (void *)(uintptr_t)*dptr);
+            return ret;
         }
-        {
-            CUresult ret = gb_alloc_from_driver(&ptr, bytesize);
-            if (ret == CUDA_SUCCESS) {
-                *dptr = (CUdeviceptr)(uintptr_t)ptr;
-                return CUDA_SUCCESS;
-            }
+        gb_log("native capacity exhausted for %zuMB; checking managed memory",
+               bytesize >> 20);
+    }
+
+    /* Capability belongs to the current context. A pre-init call or one
+     * unsupported card cannot permanently disable another valid context. */
+    if (!real_cuCtxGetDevice ||
+        real_cuCtxGetDevice(&device) != CUDA_SUCCESS ||
+        !gb_extra_for_device(device))
+        return real_cuMemAlloc_v2(dptr, bytesize);
+
+    ret = gb_alloc_uvm(&ptr, bytesize);
+    if (ret == CUDA_SUCCESS) {
+        *dptr = (CUdeviceptr)(uintptr_t)ptr;
+        return ret;
+    }
+    if (ret != CUDA_ERROR_OUT_OF_MEMORY && ret != CUDA_ERROR_NOT_SUPPORTED)
+        return ret;
+    if (gb_legacy_driver) {
+        ret = gb_alloc_from_driver(&ptr, bytesize);
+        if (ret == CUDA_SUCCESS) {
+            *dptr = (CUdeviceptr)(uintptr_t)ptr;
+            return ret;
         }
     }
-    return real_cuMemAlloc_v2(dptr, bytesize);
+    return gb_managed_first ? real_cuMemAlloc_v2(dptr, bytesize) : ret;
 }
 
 static CUresult CUDAAPI hooked_cuMemFree_v2(CUdeviceptr dptr)
@@ -870,6 +839,15 @@ static void gb_read_config(void)
     }
     debug = getenv("GREENBOOST_DEBUG");
     if (debug) gb_config.DebugMode = debug[0] == '1';
+    {
+        const char *policy = getenv("GREENBOOST_ALLOC_POLICY");
+        const char *legacy = getenv("GREENBOOST_LEGACY_DRIVER");
+        gb_managed_first = policy && strcmp(policy, "managed") == 0;
+        gb_legacy_driver = legacy && strcmp(legacy, "1") == 0;
+        if (policy && strcmp(policy, "adaptive") && strcmp(policy, "managed")) {
+            gb_log_err("invalid GREENBOOST_ALLOC_POLICY; using adaptive policy");
+        }
+    }
     gb_config.ThresholdBytes = gb_env_mb("GREENBOOST_THRESHOLD_MB", (size_t)gb_config.ThresholdMb << 20);
     if (!gb_config.ThresholdBytes) gb_config.ThresholdBytes = (size_t)256 << 20;
     gb_config.ThresholdMb = (ULONG)(gb_config.ThresholdBytes >> 20);
@@ -883,6 +861,8 @@ static void gb_read_config(void)
     gb_extra_bytes &= ~(((size_t)1 << 20) - 1);
     gb_log("config: extra=%zuMB reserve=%zuMB threshold=%zuMB (physical GPU capacity queried per device)",
         gb_extra_bytes >> 20, gb_reserve_bytes >> 20, gb_config.ThresholdBytes >> 20);
+    gb_log("allocation policy=%s legacy_driver=%d",
+           gb_managed_first ? "managed" : "adaptive", gb_legacy_driver);
 }
 
 /* ================================================================== */
@@ -1030,7 +1010,7 @@ static void gb_shim_init(void)
     /* Clear hash table */
     memset(gb_htable, 0, sizeof(gb_htable));
 
-    /* Initialize UVM state (probe deferred to first interception) */
+    /* Managed capability is queried on the allocating context. */
     gb_config.GpuDevice = 0;
     gb_config.UvmAllocatedBytes = 0;
 
@@ -1041,7 +1021,8 @@ static void gb_shim_init(void)
     gb_resolve_symbols();
 
     /* Validate we have the minimum required symbols */
-    if (!real_cuMemHostRegister || !real_cuMemHostGetDevicePointer) {
+    if (!real_cuMemAlloc_v2 || !real_cuMemFree_v2 || !real_cuMemGetInfo ||
+        !real_cuDeviceTotalMem_v2 || !real_cuCtxGetDevice) {
         gb_log_err("critical CUDA symbols not found — shim disabled");
         gb_config.Initialized = FALSE;
         return;
@@ -1050,8 +1031,9 @@ static void gb_shim_init(void)
     /* Start prefetch worker thread */
     InitializeCriticalSectionAndSpinCount(&prefetch_cs, 4000);
     InitializeConditionVariable(&prefetch_cv);
-    prefetch_running = TRUE;
-    prefetch_thread_handle = CreateThread(NULL, 0, prefetch_worker, NULL, 0, NULL);
+    prefetch_running = gb_legacy_driver;
+    if (gb_legacy_driver)
+        prefetch_thread_handle = CreateThread(NULL, 0, prefetch_worker, NULL, 0, NULL);
     if (prefetch_thread_handle)
         gb_log("prefetch worker started");
 

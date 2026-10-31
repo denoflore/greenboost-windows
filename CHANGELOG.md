@@ -4,6 +4,25 @@ All notable changes to the GreenBoost Windows port.
 
 ## [Unreleased]
 
+### 2.5.0 experimental, October 31, 2026
+
+- Prefer native VRAM for synchronous allocations; attempt managed memory after
+  native out-of-memory. Retain an explicit managed-first policy.
+- Query managed support on the active CUDA context so a pre-initialization
+  failure does not disable later valid allocations.
+- Keep the legacy KMDF path and its worker explicitly opt-in.
+- Add GPU capability inspection, selectable KV cache formats, batch controls
+  and a direct CUDA 12.4/13.4 backend selector to the inference helper.
+- Add an optional read-only file residency library using stable CUDA virtual
+  addresses, bounded physical VRAM and pinned RAM staging. Hardware memory
+  compression is opt-in and checked against actual allocation properties.
+- Validate both allocation policies on five RTX GPUs and five allocation cases
+  across eight CUDA runtimes. Preserve benchmark conditions and limits in
+  [EXPERIMENTAL.md](windows-port/EXPERIMENTAL.md).
+- The file API is a developer component; llama.cpp scheduler integration,
+  RTX 2000 hardware execution and long-running production qualification remain
+  outside the demonstrated scope. No new public release is implied.
+
 ### Fixed — Install script silent-failure (issue #10)
 - `tools/install.ps1` previously returned `$true` from `Install-GreenBoostDriver`
   even when devcon failed and the service didn't register. Combined with the

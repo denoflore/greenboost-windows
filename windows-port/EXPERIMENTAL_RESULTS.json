@@ -1,0 +1,4108 @@
+{
+  "driver": "610.88",
+  "windows_build": "26200",
+  "telemetry_method": "nvidia-smi device utilisation sampled about every 500 ms during each owned process. Device-level, not per-process utilisation. Runtime batches contain five sequential child processes.",
+  "backend": "llama.cpp b12019 / 1052f7e1d",
+  "cases": [
+    {
+      "started_utc": "2026-10-31T08:08:33.4753609Z",
+      "exit": 1,
+      "observed_process_pids": [
+        53732
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 5.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "alloc-baseline",
+      "launcher_or_test_pid": 53732,
+      "finished_utc": "2026-10-31T08:08:37.0220832Z",
+      "evidence": [
+        "pid=53732 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=12287",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "FAIL: passthrough allocation was intercepted"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:13:55.171349Z",
+      "exit": 0,
+      "observed_process_pids": [
+        51572
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 4
+        }
+      ],
+      "name": "alloc-candidate",
+      "launcher_or_test_pid": 51572,
+      "finished_utc": "2026-10-31T08:13:58.0659934Z",
+      "evidence": [
+        "pid=51572 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=12287",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=0 memory_type=2",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:14:01.0305629Z",
+      "exit": 0,
+      "observed_process_pids": [
+        54672
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 3.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 6.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 6
+        }
+      ],
+      "name": "alloc-metamorphic",
+      "launcher_or_test_pid": 54672,
+      "finished_utc": "2026-10-31T08:14:04.5080518Z",
+      "evidence": [
+        "pid=54672 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=12287",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:13:00.0949884Z",
+      "exit": 1,
+      "observed_process_pids": [
+        4292
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "alloc-unpatched",
+      "launcher_or_test_pid": 4292,
+      "finished_utc": "2026-10-31T08:13:03.0549501Z",
+      "evidence": [
+        "pid=4292 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=12287",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "FAIL: passthrough allocation was intercepted"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:34:27.5881643Z",
+      "exit": 0,
+      "observed_process_pids": [
+        39788
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 10.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        }
+      ],
+      "name": "cache-verbose-gpu1-q8_0-cu13.4",
+      "launcher_or_test_pid": 41568,
+      "finished_utc": "2026-10-31T08:34:29.8749672Z",
+      "evidence": [
+        "The inspection code is **IVORY-627**. [end of text]",
+        "0.00.254.342 I llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 5090) (0000:01:00.0) - 35090 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 000000191A800000",
+        "0.00.687.933 I load_tensors: offloaded 33/33 layers to GPU",
+        "0.01.489.880 I llama_kv_cache:      CUDA0 KV buffer size =   544.00 MiB",
+        "0.01.586.787 I sampler chain: logits -> +temp-ext -> +greedy "
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:34:18.2595513Z",
+      "exit": 0,
+      "observed_process_pids": [
+        27480
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 67.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "cache-verbose-gpu4-f16-cu13.4",
+      "launcher_or_test_pid": 53604,
+      "finished_utc": "2026-10-31T08:34:21.1655269Z",
+      "evidence": [
+        "The inspection code is **IVORY-627**. [end of text]",
+        "0.00.276.562 I llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001B05800000",
+        "0.00.922.617 I load_tensors: offloaded 33/33 layers to GPU",
+        "0.01.864.956 I llama_kv_cache:      CUDA0 KV buffer size =  1024.00 MiB",
+        "0.01.951.594 I sampler chain: logits -> +temp-ext -> +greedy "
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:34:24.5933973Z",
+      "exit": 0,
+      "observed_process_pids": [
+        55128
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 67.0,
+          "nonzero_samples": 3
+        }
+      ],
+      "name": "cache-verbose-gpu4-q4_0-cu13.4",
+      "launcher_or_test_pid": 7672,
+      "finished_utc": "2026-10-31T08:34:27.4772363Z",
+      "evidence": [
+        "The inspection code is **IVORY-627**. [end of text]",
+        "0.00.224.632 I llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001B05800000",
+        "0.00.633.893 I load_tensors: offloaded 33/33 layers to GPU",
+        "0.01.511.833 I llama_kv_cache:      CUDA0 KV buffer size =   288.00 MiB",
+        "0.01.618.911 I sampler chain: logits -> +temp-ext -> +greedy "
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:34:29.9684446Z",
+      "exit": 0,
+      "observed_process_pids": [
+        11484
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 91.0,
+          "nonzero_samples": 4
+        }
+      ],
+      "name": "cache-verbose-gpu4-q8_0-cu12.4",
+      "launcher_or_test_pid": 55224,
+      "finished_utc": "2026-10-31T08:34:32.8365308Z",
+      "evidence": [
+        "The inspection code is **IVORY-627**. [end of text]",
+        "0.00.197.291 I llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001B05800000",
+        "0.00.678.651 I load_tensors: offloaded 33/33 layers to GPU",
+        "0.01.629.021 I llama_kv_cache:      CUDA0 KV buffer size =   544.00 MiB",
+        "0.01.776.839 I sampler chain: logits -> +temp-ext -> +greedy "
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:34:21.5085053Z",
+      "exit": 0,
+      "observed_process_pids": [
+        31576
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 66.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "cache-verbose-gpu4-q8_0-cu13.4",
+      "launcher_or_test_pid": 54848,
+      "finished_utc": "2026-10-31T08:34:24.4212452Z",
+      "evidence": [
+        "The inspection code is **IVORY-627**. [end of text]",
+        "0.00.378.649 I llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001B05800000",
+        "0.00.788.621 I load_tensors: offloaded 33/33 layers to GPU",
+        "0.01.681.846 I llama_kv_cache:      CUDA0 KV buffer size =   544.00 MiB",
+        "0.01.769.426 I sampler chain: logits -> +temp-ext -> +greedy "
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:09:17.3223154Z",
+      "exit": 1,
+      "observed_process_pids": [
+        12836
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 4
+        }
+      ],
+      "name": "early-baseline",
+      "launcher_or_test_pid": 12836,
+      "finished_utc": "2026-10-31T08:09:20.1987933Z",
+      "evidence": [
+        "early_allocation_result=3 expected=3",
+        "pid=12836 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=13311",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=0 memory_type=2",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "FAIL: allocation bypassed GreenBoost"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:13:58.0997003Z",
+      "exit": 0,
+      "observed_process_pids": [
+        6536
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 5.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "early-candidate",
+      "launcher_or_test_pid": 6536,
+      "finished_utc": "2026-10-31T08:14:01.0023572Z",
+      "evidence": [
+        "early_allocation_result=3 expected=3",
+        "pid=6536 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=13311",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:14:04.5276007Z",
+      "exit": 0,
+      "observed_process_pids": [
+        34228
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 4
+        }
+      ],
+      "name": "early-metamorphic",
+      "launcher_or_test_pid": 34228,
+      "finished_utc": "2026-10-31T08:14:07.4282022Z",
+      "evidence": [
+        "early_allocation_result=3 expected=3",
+        "pid=34228 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=12287",
+        "lookup=2 total_mb=12287 allocation_mb=512 managed=0 memory_type=2",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:12:57.200828Z",
+      "exit": 1,
+      "observed_process_pids": [
+        53020
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "early-unpatched",
+      "launcher_or_test_pid": 53020,
+      "finished_utc": "2026-10-31T08:13:00.0555273Z",
+      "evidence": [
+        "early_allocation_result=3 expected=3",
+        "pid=53020 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=13311",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=0 memory_type=2",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "FAIL: allocation bypassed GreenBoost"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:40:46.0162043Z",
+      "exit": 0,
+      "observed_process_pids": [],
+      "gpu_telemetry": [
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "final-capacity",
+      "launcher_or_test_pid": 41768,
+      "finished_utc": "2026-10-31T08:40:46.5900395Z",
+      "evidence": [
+        "device=4 physical_mb=12287 reported_mb=13311 extra_mb=1024",
+        "device=1 physical_mb=32606 reported_mb=33630 extra_mb=1024",
+        "PASS: per-device physical capacity plus configured allowance"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:43:18.4494579Z",
+      "exit": 0,
+      "observed_process_pids": [
+        26148,
+        26396
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 5.0,
+          "nonzero_samples": 2
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "final-child-A",
+      "launcher_or_test_pid": 51224,
+      "finished_utc": "2026-10-31T08:43:21.9060442Z",
+      "evidence": [
+        "pid=26396 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:43:21.9863111Z",
+      "exit": 0,
+      "observed_process_pids": [
+        37296,
+        54684
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 3.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 4.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 3
+        }
+      ],
+      "name": "final-child-W",
+      "launcher_or_test_pid": 52444,
+      "finished_utc": "2026-10-31T08:43:24.875308Z",
+      "evidence": [
+        "pid=54684 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:40:46.6350756Z",
+      "exit": 0,
+      "observed_process_pids": [
+        51952
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 98.0,
+          "nonzero_samples": 4
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "final-driver-gpu0-adaptive",
+      "launcher_or_test_pid": 51952,
+      "finished_utc": "2026-10-31T08:40:49.4959224Z",
+      "evidence": [
+        "pid=51952 device=0 name=NVIDIA GeForce RTX 4090 pci=0000:03:00.0 concurrentManagedAccess=0 physical_mb=24563",
+        "lookup=2 total_mb=25587 allocation_mb=512 managed=0 memory_type=2",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:40:49.5183931Z",
+      "exit": 0,
+      "observed_process_pids": [
+        54900
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 98.0,
+          "nonzero_samples": 5
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 5.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "final-driver-gpu0-managed",
+      "launcher_or_test_pid": 54900,
+      "finished_utc": "2026-10-31T08:40:52.4769857Z",
+      "evidence": [
+        "pid=54900 device=0 name=NVIDIA GeForce RTX 4090 pci=0000:03:00.0 concurrentManagedAccess=0 physical_mb=24563",
+        "lookup=2 total_mb=25587 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:40:52.4956927Z",
+      "exit": 0,
+      "observed_process_pids": [
+        52380
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 98.0,
+          "nonzero_samples": 4
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "final-driver-gpu1-adaptive",
+      "launcher_or_test_pid": 52380,
+      "finished_utc": "2026-10-31T08:40:55.3585009Z",
+      "evidence": [
+        "pid=52380 device=1 name=NVIDIA GeForce RTX 5090 pci=0000:01:00.0 concurrentManagedAccess=0 physical_mb=32606",
+        "lookup=2 total_mb=33630 allocation_mb=512 managed=0 memory_type=2",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:40:55.3792809Z",
+      "exit": 0,
+      "observed_process_pids": [
+        41544
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 94.0,
+          "nonzero_samples": 5
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "final-driver-gpu1-managed",
+      "launcher_or_test_pid": 41544,
+      "finished_utc": "2026-10-31T08:40:58.256298Z",
+      "evidence": [
+        "pid=41544 device=1 name=NVIDIA GeForce RTX 5090 pci=0000:01:00.0 concurrentManagedAccess=0 physical_mb=32606",
+        "lookup=2 total_mb=33630 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:40:58.2767574Z",
+      "exit": 0,
+      "observed_process_pids": [
+        17516
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 89.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 2
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 4
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "final-driver-gpu2-adaptive",
+      "launcher_or_test_pid": 17516,
+      "finished_utc": "2026-10-31T08:41:01.2134121Z",
+      "evidence": [
+        "pid=17516 device=2 name=NVIDIA GeForce RTX 3090 pci=0000:05:00.0 concurrentManagedAccess=0 physical_mb=24575",
+        "lookup=2 total_mb=25599 allocation_mb=512 managed=0 memory_type=2",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:01.2333275Z",
+      "exit": 0,
+      "observed_process_pids": [
+        41336
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 98.0,
+          "nonzero_samples": 5
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "final-driver-gpu2-managed",
+      "launcher_or_test_pid": 41336,
+      "finished_utc": "2026-10-31T08:41:04.1576831Z",
+      "evidence": [
+        "pid=41336 device=2 name=NVIDIA GeForce RTX 3090 pci=0000:05:00.0 concurrentManagedAccess=0 physical_mb=24575",
+        "lookup=2 total_mb=25599 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:04.1770427Z",
+      "exit": 0,
+      "observed_process_pids": [
+        48308
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 4
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 3
+        }
+      ],
+      "name": "final-driver-gpu3-adaptive",
+      "launcher_or_test_pid": 48308,
+      "finished_utc": "2026-10-31T08:41:07.0429864Z",
+      "evidence": [
+        "pid=48308 device=3 name=NVIDIA GeForce RTX 5060 Ti pci=0000:08:00.0 concurrentManagedAccess=0 physical_mb=16310",
+        "lookup=2 total_mb=17334 allocation_mb=512 managed=0 memory_type=2",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:07.0627528Z",
+      "exit": 0,
+      "observed_process_pids": [
+        36808
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 5
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "final-driver-gpu3-managed",
+      "launcher_or_test_pid": 36808,
+      "finished_utc": "2026-10-31T08:41:09.9623937Z",
+      "evidence": [
+        "pid=36808 device=3 name=NVIDIA GeForce RTX 5060 Ti pci=0000:08:00.0 concurrentManagedAccess=0 physical_mb=16310",
+        "lookup=2 total_mb=17334 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:09.9894966Z",
+      "exit": 0,
+      "observed_process_pids": [
+        51692
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 95.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "final-driver-gpu4-adaptive",
+      "launcher_or_test_pid": 51692,
+      "finished_utc": "2026-10-31T08:41:12.86119Z",
+      "evidence": [
+        "pid=51692 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=12287",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=0 memory_type=2",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:12.8819594Z",
+      "exit": 0,
+      "observed_process_pids": [
+        50664
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 4.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "final-driver-gpu4-managed",
+      "launcher_or_test_pid": 50664,
+      "finished_utc": "2026-10-31T08:41:15.7553997Z",
+      "evidence": [
+        "pid=50664 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=12287",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:16.4110524Z",
+      "exit": 0,
+      "observed_process_pids": [
+        23568
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "final-early",
+      "launcher_or_test_pid": 23568,
+      "finished_utc": "2026-10-31T08:41:19.312025Z",
+      "evidence": [
+        "early_allocation_result=3 expected=3",
+        "pid=23568 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=13311",
+        "lookup=2 total_mb=13311 allocation_mb=512 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:15.8048816Z",
+      "exit": 0,
+      "observed_process_pids": [],
+      "gpu_telemetry": [
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 93.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "final-free-error",
+      "launcher_or_test_pid": 10248,
+      "finished_utc": "2026-10-31T08:41:16.3926283Z",
+      "evidence": [
+        "native free succeeded; repeated tracked free returned CUDA 1 (expected invalid value 1)"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:40:45.3789263Z",
+      "exit": 0,
+      "observed_process_pids": [],
+      "gpu_telemetry": [
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "final-lookup",
+      "launcher_or_test_pid": 4316,
+      "finished_utc": "2026-10-31T08:40:45.9634635Z",
+      "evidence": [
+        "PASS: 34 NVIDIA resolver results preserved or redirected as specified"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:35:34.8509978Z",
+      "exit": 0,
+      "observed_process_pids": [
+        23604,
+        13964,
+        41060,
+        41768,
+        3460
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 3.0,
+          "nonzero_samples": 3
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 22
+        }
+      ],
+      "name": "final-runtime-11.8",
+      "launcher_or_test_pid": 26396,
+      "finished_utc": "2026-10-31T08:35:48.750803Z",
+      "evidence": [
+        "DLL version: 6,14,11,11080",
+        "pid=23604 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=13964 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=41060 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=41768 device=4 pci=0000:09:00.0 allocation_mb=8 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=3460 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "PASS: every requested runtime completed all five CUDA cases."
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:35:48.8235489Z",
+      "exit": 0,
+      "observed_process_pids": [
+        520,
+        54668,
+        54440,
+        23836,
+        53392
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 23
+        }
+      ],
+      "name": "final-runtime-12.0",
+      "launcher_or_test_pid": 51656,
+      "finished_utc": "2026-10-31T08:36:02.6698307Z",
+      "evidence": [
+        "DLL version: 6,14,11,12000",
+        "pid=520 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=54668 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=54440 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=23836 device=4 pci=0000:09:00.0 allocation_mb=8 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=53392 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "PASS: every requested runtime completed all five CUDA cases."
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:36:02.6927592Z",
+      "exit": 0,
+      "observed_process_pids": [
+        37792,
+        36368,
+        24820,
+        39804,
+        45116
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 22
+        }
+      ],
+      "name": "final-runtime-12.4",
+      "launcher_or_test_pid": 51048,
+      "finished_utc": "2026-10-31T08:36:16.5167322Z",
+      "evidence": [
+        "DLL version: 6,14,11,12040",
+        "pid=37792 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=36368 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=24820 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=39804 device=4 pci=0000:09:00.0 allocation_mb=8 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=45116 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "PASS: every requested runtime completed all five CUDA cases."
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:36:16.5394779Z",
+      "exit": 0,
+      "observed_process_pids": [
+        35140,
+        53284,
+        13524,
+        54940,
+        38180
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 22
+        }
+      ],
+      "name": "final-runtime-12.9",
+      "launcher_or_test_pid": 17264,
+      "finished_utc": "2026-10-31T08:36:30.3804159Z",
+      "evidence": [
+        "DLL version: 6,14,11,12090",
+        "pid=35140 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=53284 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=13524 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=54940 device=4 pci=0000:09:00.0 allocation_mb=8 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=38180 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "PASS: every requested runtime completed all five CUDA cases."
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:36:30.4037838Z",
+      "exit": 0,
+      "observed_process_pids": [
+        39232,
+        52528,
+        40404,
+        16996,
+        11812
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 23
+        }
+      ],
+      "name": "final-runtime-13.0",
+      "launcher_or_test_pid": 2664,
+      "finished_utc": "2026-10-31T08:36:44.2443137Z",
+      "evidence": [
+        "DLL version: 6,14,11,13000",
+        "pid=39232 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=52528 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=40404 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=16996 device=4 pci=0000:09:00.0 allocation_mb=8 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=11812 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "PASS: every requested runtime completed all five CUDA cases."
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:36:44.2651875Z",
+      "exit": 0,
+      "observed_process_pids": [
+        47424,
+        5020,
+        53804,
+        11560,
+        55160
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 22
+        }
+      ],
+      "name": "final-runtime-13.1",
+      "launcher_or_test_pid": 53340,
+      "finished_utc": "2026-10-31T08:36:58.1191267Z",
+      "evidence": [
+        "DLL version: 6,14,11,13010",
+        "pid=47424 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=5020 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=53804 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=11560 device=4 pci=0000:09:00.0 allocation_mb=8 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=55160 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "PASS: every requested runtime completed all five CUDA cases."
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:36:58.1408049Z",
+      "exit": 0,
+      "observed_process_pids": [
+        26860,
+        39776,
+        27044,
+        38728,
+        45208
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 5.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 4.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 23
+        }
+      ],
+      "name": "final-runtime-13.3",
+      "launcher_or_test_pid": 21920,
+      "finished_utc": "2026-10-31T08:37:12.0067397Z",
+      "evidence": [
+        "DLL version: 6,14,11,13030",
+        "pid=26860 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=39776 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=27044 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=38728 device=4 pci=0000:09:00.0 allocation_mb=8 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=45208 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "PASS: every requested runtime completed all five CUDA cases."
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:37:12.0264756Z",
+      "exit": 0,
+      "observed_process_pids": [
+        53608,
+        23324,
+        38596,
+        18176,
+        24748
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 5.0,
+          "nonzero_samples": 2
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 23
+        }
+      ],
+      "name": "final-runtime-13.4",
+      "launcher_or_test_pid": 10924,
+      "finished_utc": "2026-10-31T08:37:25.8448474Z",
+      "evidence": [
+        "DLL version: 6,14,11,13040",
+        "pid=53608 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=23324 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=38596 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=13311 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=18176 device=4 pci=0000:09:00.0 allocation_mb=8 total_mb=13311 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=24748 device=4 pci=0000:09:00.0 allocation_mb=512 total_mb=12287 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "PASS: every requested runtime completed all five CUDA cases."
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:29:51.7311552Z",
+      "exit": 0,
+      "observed_process_pids": [
+        11000
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 71,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 71,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 21.0,
+          "nonzero_samples": 6
+        },
+        {
+          "total_samples": 71,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 71,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 71,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 100.0,
+          "nonzero_samples": 62
+        }
+      ],
+      "name": "mixed-managed-final",
+      "launcher_or_test_pid": 54756,
+      "finished_utc": "2026-10-31T08:30:32.7998868Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |           pp128 |        162.21 ± 5.22 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |             tg8 |          1.44 ± 0.00 |",
+        "llama_prepare_model_devices: using device CUDA4 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] UVM alloc: 3293MB -> ptr 0000000204A00000 (context device 4)",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:27:43.6798358Z",
+      "exit": 0,
+      "observed_process_pids": [
+        43036
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 93.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "mixed-short-adaptive-a",
+      "launcher_or_test_pid": 9316,
+      "finished_utc": "2026-10-31T08:27:46.5809434Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |           pp128 |      2425.42 ± 29.58 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |             tg8 |         68.67 ± 1.08 |",
+        "llama_prepare_model_devices: using device CUDA4 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001205800000",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:27:46.6806088Z",
+      "exit": 0,
+      "observed_process_pids": [
+        38624
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 93.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "mixed-short-adaptive-b",
+      "launcher_or_test_pid": 2860,
+      "finished_utc": "2026-10-31T08:27:49.5570572Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |           pp128 |       2410.72 ± 7.94 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |             tg8 |         69.03 ± 1.30 |",
+        "llama_prepare_model_devices: using device CUDA4 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001205800000",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:26:53.9564939Z",
+      "exit": 0,
+      "observed_process_pids": [
+        49288
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 86,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 86,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 31.0,
+          "nonzero_samples": 11
+        },
+        {
+          "total_samples": 86,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 18.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 86,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 86,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 100.0,
+          "nonzero_samples": 73
+        }
+      ],
+      "name": "mixed-short-managed-a",
+      "launcher_or_test_pid": 53596,
+      "finished_utc": "2026-10-31T08:27:43.4300372Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |           pp128 |        159.04 ± 3.16 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |             tg8 |          1.39 ± 0.00 |",
+        "llama_prepare_model_devices: using device CUDA4 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] UVM alloc: 3293MB -> ptr 0000000204A00000 (context device 4)",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:27:49.6387748Z",
+      "exit": 0,
+      "observed_process_pids": [
+        21468
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 77,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 3.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 77,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 9.0,
+          "nonzero_samples": 2
+        },
+        {
+          "total_samples": 77,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 14.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 77,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 77,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 100.0,
+          "nonzero_samples": 67
+        }
+      ],
+      "name": "mixed-short-managed-b",
+      "launcher_or_test_pid": 32492,
+      "finished_utc": "2026-10-31T08:28:33.9326645Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |           pp128 |        162.84 ± 0.38 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA4        | .*=CUDA4              |    1 |             tg8 |          1.42 ± 0.00 |",
+        "llama_prepare_model_devices: using device CUDA4 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] UVM alloc: 3293MB -> ptr 0000000204A00000 (context device 4)",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB",
+        "llama_kv_cache:      CUDA4 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": "Excluded from performance comparison: overlapped the first cache smoke test."
+    },
+    {
+      "started_utc": "2026-10-31T08:41:23.4579831Z",
+      "exit": 0,
+      "observed_process_pids": [
+        28444
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 18,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 12.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 18,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 22.0,
+          "nonzero_samples": 2
+        },
+        {
+          "total_samples": 18,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 36.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 18,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 26.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 18,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 100.0,
+          "nonzero_samples": 6
+        }
+      ],
+      "name": "overflow-adaptive",
+      "launcher_or_test_pid": 28444,
+      "finished_utc": "2026-10-31T08:41:33.992606Z",
+      "evidence": [
+        "pid=28444 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=12287",
+        "lookup=2 total_mb=13311 allocation_mb=12544 managed=1 memory_type=1",
+        "gpu_value=305419896 expected_value=305419896 freed=1",
+        "PASS: CUDA allocation, GPU write, readback and free",
+        "[GreenBoost] native capacity exhausted for 12544MB; checking managed memory"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:22.2824541Z",
+      "exit": 1,
+      "observed_process_pids": [
+        3020
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 2,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 2,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 2,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 2,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 2,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 98.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "overflow-native",
+      "launcher_or_test_pid": 3020,
+      "finished_utc": "2026-10-31T08:41:23.4344327Z",
+      "evidence": [
+        "pid=3020 device=4 name=NVIDIA GeForce RTX 3060 pci=0000:09:00.0 concurrentManagedAccess=0 physical_mb=12287",
+        "cuMemAlloc_v2(&ptr, bytes) failed: CUDA 2"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:51:20.5381293Z",
+      "exit": 0,
+      "observed_process_pids": [
+        32412
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 69.0,
+          "nonzero_samples": 4
+        },
+        {
+          "total_samples": 6,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "package-helper-benchmark-5060",
+      "launcher_or_test_pid": 21576,
+      "finished_utc": "2026-10-31T08:51:24.015731Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   q8_0 |   q8_0 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |            pp64 |     3000.55 ± 419.50 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   q8_0 |   q8_0 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |            tg32 |         92.67 ± 6.54 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 5060 Ti) (0000:08:00.0) - 19270 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001B06A00000",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =     4.25 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     4.25 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:47:53.4116804Z",
+      "exit": 0,
+      "observed_process_pids": [
+        40280
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 10.0,
+          "nonzero_samples": 2
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "package-helper",
+      "launcher_or_test_pid": 53296,
+      "finished_utc": "2026-10-31T08:47:56.3831936Z",
+      "evidence": [
+        "PASS: packaged inference helper completed CUDA inference, restored every changed setting, and rejected invalid batch geometry",
+        "0.00.470.388 I llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 5090) (0000:01:00.0) - 35090 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 000000191A800000",
+        "0.00.969.685 I load_tensors: offloaded 33/33 layers to GPU",
+        "0.01.798.156 I llama_kv_cache:      CUDA0 KV buffer size =    68.00 MiB",
+        "0.01.913.894 I sampler chain: logits -> +temp-ext -> +greedy "
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:47:56.561244Z",
+      "exit": 0,
+      "observed_process_pids": [
+        55180,
+        17700,
+        50116,
+        51716,
+        11884
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 97.0,
+          "nonzero_samples": 22
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 24,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 5.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "package-runtime-13.4-5090",
+      "launcher_or_test_pid": 17488,
+      "finished_utc": "2026-10-31T08:48:10.4861181Z",
+      "evidence": [
+        "DLL version: 6,14,11,13040",
+        "pid=55180 device=1 pci=0000:01:00.0 allocation_mb=512 total_mb=32606 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=17700 device=1 pci=0000:01:00.0 allocation_mb=512 total_mb=33630 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=50116 device=1 pci=0000:01:00.0 allocation_mb=512 total_mb=33630 managed=1",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=51716 device=1 pci=0000:01:00.0 allocation_mb=8 total_mb=33630 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "pid=11884 device=1 pci=0000:01:00.0 allocation_mb=512 total_mb=32606 managed=0",
+        "gpu_value=1515870810 expected_value=1515870810 freed=1",
+        "PASS: real CUDA runtime allocation, GPU memset, readback and free",
+        "PASS: every requested runtime completed all five CUDA cases."
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:48:10.5346837Z",
+      "exit": 0,
+      "observed_process_pids": [
+        26760
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 97.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 93.0,
+          "nonzero_samples": 3
+        }
+      ],
+      "name": "package-storage",
+      "launcher_or_test_pid": 26760,
+      "finished_utc": "2026-10-31T08:48:12.854621Z",
+      "evidence": [
+        "pid=26760 CUDA=4 name=NVIDIA GeForce RTX 3060 PCI=0000:09:00.0 compression_requested=1 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=1",
+        "read_bytes=511705340 hits=71821 misses=62 evictions=58 two_sweeps_ms=125 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:15:49.0887399Z",
+      "exit": 0,
+      "observed_process_pids": [
+        23224
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 7
+        },
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 3
+        }
+      ],
+      "name": "policy-gpu0-adaptive-a",
+      "launcher_or_test_pid": 40504,
+      "finished_utc": "2026-10-31T08:15:54.2403292Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |    15552.59 ± 427.12 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |        170.86 ± 0.10 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 4090) (0000:03:00.0) - 27136 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001B14A00000",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:15:54.3243241Z",
+      "exit": 0,
+      "observed_process_pids": [
+        55188
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 6
+        },
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 9,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "policy-gpu0-adaptive-b",
+      "launcher_or_test_pid": 54456,
+      "finished_utc": "2026-10-31T08:15:59.5149649Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |    15554.65 ± 372.60 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |        169.78 ± 1.56 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 4090) (0000:03:00.0) - 27136 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001B14A00000",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:15:43.1863217Z",
+      "exit": 0,
+      "observed_process_pids": [
+        1984
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 97.0,
+          "nonzero_samples": 7
+        },
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "policy-gpu0-managed-a",
+      "launcher_or_test_pid": 35400,
+      "finished_utc": "2026-10-31T08:15:49.0100829Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |    15386.93 ± 283.70 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |        170.91 ± 1.53 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 4090) (0000:03:00.0) - 27136 MiB free",
+        "[GreenBoost] UVM alloc: 3293MB -> ptr 0000002200000000 (context device 0)",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:15:59.5962244Z",
+      "exit": 0,
+      "observed_process_pids": [
+        39468
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 7
+        },
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 10,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "policy-gpu0-managed-b",
+      "launcher_or_test_pid": 54716,
+      "finished_utc": "2026-10-31T08:16:05.3557503Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |   14530.63 ± 1769.91 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |        171.65 ± 0.99 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 4090) (0000:03:00.0) - 27136 MiB free",
+        "[GreenBoost] UVM alloc: 3293MB -> ptr 0000002200000000 (context device 0)",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:16:10.0775951Z",
+      "exit": 0,
+      "observed_process_pids": [
+        6088
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 95.0,
+          "nonzero_samples": 4
+        },
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "policy-gpu1-adaptive-a",
+      "launcher_or_test_pid": 4120,
+      "finished_utc": "2026-10-31T08:16:14.1259531Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |    18007.84 ± 703.15 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |        291.97 ± 2.22 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 5090) (0000:01:00.0) - 35090 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 000000191A800000",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:16:14.2111778Z",
+      "exit": 0,
+      "observed_process_pids": [
+        52212
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 5
+        },
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 7,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "policy-gpu1-adaptive-b",
+      "launcher_or_test_pid": 14292,
+      "finished_utc": "2026-10-31T08:16:18.2331936Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |    18004.81 ± 711.22 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |        292.67 ± 1.62 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 5090) (0000:01:00.0) - 35090 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001E1A800000",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:16:05.4221399Z",
+      "exit": 0,
+      "observed_process_pids": [
+        23088
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 5
+        },
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 3.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "policy-gpu1-managed-a",
+      "launcher_or_test_pid": 39756,
+      "finished_utc": "2026-10-31T08:16:09.9985472Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |    17984.13 ± 693.12 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |        287.45 ± 8.96 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 5090) (0000:01:00.0) - 35090 MiB free",
+        "[GreenBoost] UVM alloc: 3293MB -> ptr 0000002300000000 (context device 0)",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:16:18.314371Z",
+      "exit": 0,
+      "observed_process_pids": [
+        1772
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 5
+        },
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 8,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "policy-gpu1-managed-b",
+      "launcher_or_test_pid": 440,
+      "finished_utc": "2026-10-31T08:16:22.92925Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |    18005.22 ± 760.87 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |        290.94 ± 7.78 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 5090) (0000:01:00.0) - 35090 MiB free",
+        "[GreenBoost] UVM alloc: 3293MB -> ptr 0000002200000000 (context device 0)",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:15:16.4897919Z",
+      "exit": 0,
+      "observed_process_pids": [
+        50868
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 100.0,
+          "nonzero_samples": 13
+        }
+      ],
+      "name": "policy-gpu4-adaptive-a",
+      "launcher_or_test_pid": 19352,
+      "finished_utc": "2026-10-31T08:15:25.0912398Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |      3189.61 ± 27.08 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |         73.79 ± 0.13 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001B05800000",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:15:25.2397072Z",
+      "exit": 0,
+      "observed_process_pids": [
+        51260
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 2
+        },
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 15,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 100.0,
+          "nonzero_samples": 13
+        }
+      ],
+      "name": "policy-gpu4-adaptive-b",
+      "launcher_or_test_pid": 19844,
+      "finished_utc": "2026-10-31T08:15:33.8195327Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |      3211.77 ± 11.85 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |         73.71 ± 0.22 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] native alloc: 3293MB -> ptr 0000001B05800000",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:15:07.0358646Z",
+      "exit": 0,
+      "observed_process_pids": [
+        3648
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 99.0,
+          "nonzero_samples": 13
+        }
+      ],
+      "name": "policy-gpu4-managed-a",
+      "launcher_or_test_pid": 5000,
+      "finished_utc": "2026-10-31T08:15:16.1987906Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |       3179.97 ± 8.82 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |         73.61 ± 0.29 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] UVM alloc: 3293MB -> ptr 0000001F00000000 (context device 0)",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:15:33.9082157Z",
+      "exit": 0,
+      "observed_process_pids": [
+        43260
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 16,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 98.0,
+          "nonzero_samples": 13
+        }
+      ],
+      "name": "policy-gpu4-managed-b",
+      "launcher_or_test_pid": 35560,
+      "finished_utc": "2026-10-31T08:15:43.1084261Z",
+      "evidence": [
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           pp512 |       3207.01 ± 7.31 |",
+        "| qwen35 4B Q6_K                 |   3.22 GiB |     4.21 B | CUDA       | 999 |       1 |   none |   1 | CUDA0        | .*=CUDA0              |    1 |           tg128 |         73.59 ± 0.25 |",
+        "llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 3060) (0000:09:00.0) - 15346 MiB free",
+        "[GreenBoost] UVM alloc: 3293MB -> ptr 0000001F00000000 (context device 0)",
+        "load_tensors: offloaded 33/33 layers to GPU",
+        "llama_kv_cache:      CUDA0 KV buffer size =    16.00 MiB",
+        "llama_kv_cache:      CUDA0 KV buffer size =     8.00 MiB"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:22:27.2453176Z",
+      "exit": 0,
+      "observed_process_pids": [
+        28636
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 94.0,
+          "nonzero_samples": 5
+        }
+      ],
+      "name": "storage-3060-plain",
+      "launcher_or_test_pid": 28636,
+      "finished_utc": "2026-10-31T08:22:30.1016129Z",
+      "evidence": [
+        "pid=28636 CUDA=4 name=NVIDIA GeForce RTX 3060 PCI=0000:09:00.0 compression_requested=0 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=0",
+        "read_bytes=511705340 hits=63105 misses=62 evictions=58 two_sweeps_ms=94 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:23:26.8073076Z",
+      "exit": 0,
+      "observed_process_pids": [
+        39396
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 77.0,
+          "nonzero_samples": 3
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 93.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "storage-gpu0-comp0",
+      "launcher_or_test_pid": 39396,
+      "finished_utc": "2026-10-31T08:23:29.1540683Z",
+      "evidence": [
+        "pid=39396 CUDA=0 name=NVIDIA GeForce RTX 4090 PCI=0000:03:00.0 compression_requested=0 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=0",
+        "read_bytes=511705340 hits=267849 misses=62 evictions=58 two_sweeps_ms=109 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:23:29.1740666Z",
+      "exit": 0,
+      "observed_process_pids": [
+        39228
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 76.0,
+          "nonzero_samples": 4
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        }
+      ],
+      "name": "storage-gpu0-comp1",
+      "launcher_or_test_pid": 39228,
+      "finished_utc": "2026-10-31T08:23:31.510495Z",
+      "evidence": [
+        "pid=39228 CUDA=0 name=NVIDIA GeForce RTX 4090 PCI=0000:03:00.0 compression_requested=1 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=1",
+        "read_bytes=511705340 hits=266049 misses=62 evictions=58 two_sweeps_ms=156 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:23:31.5285717Z",
+      "exit": 0,
+      "observed_process_pids": [
+        49976
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 80.0,
+          "nonzero_samples": 3
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 21.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        }
+      ],
+      "name": "storage-gpu1-comp0",
+      "launcher_or_test_pid": 49976,
+      "finished_utc": "2026-10-31T08:23:33.9317401Z",
+      "evidence": [
+        "pid=49976 CUDA=1 name=NVIDIA GeForce RTX 5090 PCI=0000:01:00.0 compression_requested=0 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=0",
+        "read_bytes=511705340 hits=276585 misses=62 evictions=58 two_sweeps_ms=110 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:23:33.956059Z",
+      "exit": 0,
+      "observed_process_pids": [
+        36276
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 79.0,
+          "nonzero_samples": 4
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "storage-gpu1-comp1",
+      "launcher_or_test_pid": 36276,
+      "finished_utc": "2026-10-31T08:23:36.2810019Z",
+      "evidence": [
+        "pid=36276 CUDA=1 name=NVIDIA GeForce RTX 5090 PCI=0000:01:00.0 compression_requested=1 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=1",
+        "read_bytes=511705340 hits=279565 misses=62 evictions=58 two_sweeps_ms=94 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:23:36.3077489Z",
+      "exit": 0,
+      "observed_process_pids": [
+        2664
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 80.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 89.0,
+          "nonzero_samples": 3
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "storage-gpu2-comp0",
+      "launcher_or_test_pid": 2664,
+      "finished_utc": "2026-10-31T08:23:38.751747Z",
+      "evidence": [
+        "pid=2664 CUDA=2 name=NVIDIA GeForce RTX 3090 PCI=0000:05:00.0 compression_requested=0 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=0",
+        "read_bytes=511705340 hits=127133 misses=62 evictions=58 two_sweeps_ms=125 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:23:38.7708446Z",
+      "exit": 0,
+      "observed_process_pids": [
+        44480
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 89.0,
+          "nonzero_samples": 5
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 5,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "storage-gpu2-comp1",
+      "launcher_or_test_pid": 44480,
+      "finished_utc": "2026-10-31T08:23:41.7220914Z",
+      "evidence": [
+        "pid=44480 CUDA=2 name=NVIDIA GeForce RTX 3090 PCI=0000:05:00.0 compression_requested=1 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=1",
+        "read_bytes=511705340 hits=127633 misses=62 evictions=58 two_sweeps_ms=157 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:23:41.7413285Z",
+      "exit": 0,
+      "observed_process_pids": [
+        25136
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 81.0,
+          "nonzero_samples": 3
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 2
+        }
+      ],
+      "name": "storage-gpu3-comp0",
+      "launcher_or_test_pid": 25136,
+      "finished_utc": "2026-10-31T08:23:44.0815546Z",
+      "evidence": [
+        "pid=25136 CUDA=3 name=NVIDIA GeForce RTX 5060 Ti PCI=0000:08:00.0 compression_requested=0 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=0",
+        "read_bytes=511705340 hits=164817 misses=62 evictions=58 two_sweeps_ms=110 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:23:44.10025Z",
+      "exit": 0,
+      "observed_process_pids": [
+        8392
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 84.0,
+          "nonzero_samples": 4
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 1.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "storage-gpu3-comp1",
+      "launcher_or_test_pid": 8392,
+      "finished_utc": "2026-10-31T08:23:46.4345287Z",
+      "evidence": [
+        "pid=8392 CUDA=3 name=NVIDIA GeForce RTX 5060 Ti PCI=0000:08:00.0 compression_requested=1 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=1",
+        "read_bytes=511705340 hits=162881 misses=62 evictions=58 two_sweeps_ms=109 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:23:24.4598271Z",
+      "exit": 0,
+      "observed_process_pids": [
+        15348
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 93.0,
+          "nonzero_samples": 3
+        }
+      ],
+      "name": "storage-gpu4-comp1",
+      "launcher_or_test_pid": 15348,
+      "finished_utc": "2026-10-31T08:23:26.782547Z",
+      "evidence": [
+        "pid=15348 CUDA=4 name=NVIDIA GeForce RTX 3060 PCI=0000:09:00.0 compression_requested=1 seed=12345",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=1",
+        "read_bytes=511705340 hits=71529 misses=62 evictions=58 two_sweeps_ms=125 mismatches=0 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "PASS: file residency, eviction, reload, stable CUDA addresses, GPU data verification"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:21.6893639Z",
+      "exit": 1,
+      "observed_process_pids": [
+        52848
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 1,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 95.0,
+          "nonzero_samples": 1
+        }
+      ],
+      "name": "storage-missing-file",
+      "launcher_or_test_pid": 52848,
+      "finished_utc": "2026-10-31T08:41:22.2644254Z",
+      "evidence": [
+        "pid=52848 CUDA=4 name=NVIDIA GeForce RTX 3060 PCI=0000:09:00.0 compression_requested=0 seed=12345",
+        "FAIL: open tensor file: Windows 2"
+      ],
+      "exclusion": null
+    },
+    {
+      "started_utc": "2026-10-31T08:41:19.3625485Z",
+      "exit": 1,
+      "observed_process_pids": [
+        41336
+      ],
+      "gpu_telemetry": [
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 0,
+          "pci": "00000000:01:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 1,
+          "pci": "00000000:03:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 2,
+          "pci": "00000000:05:00.0",
+          "peak_percent": 2.0,
+          "nonzero_samples": 1
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 3,
+          "pci": "00000000:08:00.0",
+          "peak_percent": 0.0,
+          "nonzero_samples": 0
+        },
+        {
+          "total_samples": 4,
+          "nvidia_smi_index": 4,
+          "pci": "00000000:09:00.0",
+          "peak_percent": 96.0,
+          "nonzero_samples": 4
+        }
+      ],
+      "name": "storage-wrong-seed",
+      "launcher_or_test_pid": 41336,
+      "finished_utc": "2026-10-31T08:41:21.6685559Z",
+      "evidence": [
+        "pid=41336 CUDA=4 name=NVIDIA GeForce RTX 3060 PCI=0000:09:00.0 compression_requested=0 seed=54321",
+        "file_bytes=268435708 resident_limit=33554432 staging_bytes=16777216 chunk=8388608 actual_compression=0",
+        "read_bytes=511705340 hits=43577 misses=62 evictions=58 two_sweeps_ms=125 mismatches=1403519006 stable_pointer=1 rejected_range=1 rejected_capacity=1",
+        "FAIL: GPU detected file data mismatch"
+      ],
+      "exclusion": null
+    }
+  ],
+  "raw_evidence": "Local .validation/<name>.out, .err, .gpu.txt, .receipt.json; excluded setup and timed-out run also retained.",
+  "date": "2026-10-31",
+  "scope": "Isolated Windows workstation; not deployment or universal qualification",
+  "model": "Qwen3.5-4B-SFT-Claude-Opus-Reasoning-Unsloth.i1-Q6_K.gguf"
+}

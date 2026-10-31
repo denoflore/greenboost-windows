@@ -15,7 +15,7 @@
 #   cmake --build windows-port/build --config Release
 
 cmake_minimum_required(VERSION 3.20)
-project(GreenBoost-Windows VERSION 2.4.0 LANGUAGES C CXX)
+project(GreenBoost-Windows VERSION 2.5.0 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "The Windows port requires Windows and MSVC.")
@@ -46,8 +46,14 @@ endif()
 add_subdirectory(shim)
 
 add_executable(greenboost tools/launch.cpp)
+add_executable(greenboost-info tools/inspect_cuda.c)
 target_compile_features(greenboost PRIVATE cxx_std_11)
 target_link_libraries(greenboost PRIVATE gb_detours)
 
 # IOCTL test tool
 add_subdirectory(tests)
+
+option(GB_BUILD_STORAGE "Build the experimental CUDA file residency library and test" OFF)
+if(GB_BUILD_STORAGE)
+    add_subdirectory(storage)
+endif()

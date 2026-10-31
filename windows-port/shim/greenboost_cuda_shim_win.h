@@ -140,13 +140,6 @@ typedef struct {
     HANDLE  PressureEvent;     /* GreenBoostPressure named event */
     BOOL    Initialized;
 
-    /* UVM probe state — deferred to first interception, not DLL load.
-     * At DLL_PROCESS_ATTACH no CUDA context exists yet, so calling
-     * cuMemAllocManaged would fail with CUDA_ERROR_NOT_INITIALIZED.
-     * The probe runs once on the first intercepted cudaMalloc call,
-     * where a CUDA context is guaranteed to exist. */
-    BOOL    UvmProbed;         /* TRUE after first-use probe completed */
-    BOOL    UvmAvailable;      /* TRUE if cuMemAllocManaged works     */
     CUdevice GpuDevice;                /* GPU ordinal for prefetch target  */
     volatile LONG64 UvmAllocatedBytes; /* shim-side UVM accounting         */
 } gb_shim_config_t;

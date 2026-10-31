@@ -1,5 +1,8 @@
 # Windows beta validation
 
+Historical beta measurements follow. For the changed allocation policy and
+new file residency API in 2.5.0 experimental, see [EXPERIMENTAL.md](EXPERIMENTAL.md).
+
 Date: October 31, 2026. NVIDIA driver: 610.88. Scope: isolated Windows x64 processes on one workstation, not a production deployment or a cross-hardware compatibility claim.
 
 ## Beta 2 compatibility checks
