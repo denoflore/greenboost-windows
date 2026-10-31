@@ -5,6 +5,11 @@
 cmake_minimum_required(VERSION 3.20)
 
 add_executable(test_ioctl test_ioctl.c)
+add_executable(test_cuda test_cuda.c)
+add_executable(test_runtime test_runtime.c)
+add_executable(test_child test_child.c)
+add_executable(test_capacity test_capacity.c)
+add_executable(test_free_error test_free_error.c)
 
 target_include_directories(test_ioctl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../driver

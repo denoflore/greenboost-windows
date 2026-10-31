@@ -36,13 +36,16 @@ target_link_libraries(greenboost_cuda PRIVATE
 # vcpkg typically installs header as <prefix>/include/detours.h.
 # Clear stale cache from previous find_path patterns.
 unset(DETOURS_INCLUDE_DIR CACHE)
+unset(DETOURS_INCLUDE_DIR_REAL CACHE)
+unset(DETOURS_LIBRARY_RELEASE CACHE)
+unset(DETOURS_LIBRARY_DEBUG CACHE)
 find_path(DETOURS_INCLUDE_DIR_REAL
     NAMES detours.h
     PATH_SUFFIXES detours
 )
 find_library(DETOURS_LIBRARY_RELEASE
     NAMES detours
-    PATH_SUFFIXES lib
+    PATH_SUFFIXES lib lib.X64
 )
 find_library(DETOURS_LIBRARY_DEBUG
     NAMES detours
@@ -51,17 +54,20 @@ find_library(DETOURS_LIBRARY_DEBUG
 
 if(DETOURS_INCLUDE_DIR_REAL AND (DETOURS_LIBRARY_RELEASE OR DETOURS_LIBRARY_DEBUG))
     message(STATUS "Detours found: ${DETOURS_INCLUDE_DIR_REAL}")
-    target_include_directories(greenboost_cuda PRIVATE ${DETOURS_INCLUDE_DIR_REAL})
-    if(DETOURS_LIBRARY_RELEASE)
-        target_link_libraries(greenboost_cuda PRIVATE optimized ${DETOURS_LIBRARY_RELEASE})
-    endif()
-    if(DETOURS_LIBRARY_DEBUG)
-        target_link_libraries(greenboost_cuda PRIVATE debug ${DETOURS_LIBRARY_DEBUG})
+    add_library(gb_detours INTERFACE)
+    target_include_directories(gb_detours INTERFACE ${DETOURS_INCLUDE_DIR_REAL})
+    if(DETOURS_LIBRARY_RELEASE AND DETOURS_LIBRARY_DEBUG)
+        target_link_libraries(gb_detours INTERFACE optimized ${DETOURS_LIBRARY_RELEASE})
+        target_link_libraries(gb_detours INTERFACE debug ${DETOURS_LIBRARY_DEBUG})
+    elseif(DETOURS_LIBRARY_RELEASE)
+        target_link_libraries(gb_detours INTERFACE ${DETOURS_LIBRARY_RELEASE})
+    else()
+        target_link_libraries(gb_detours INTERFACE ${DETOURS_LIBRARY_DEBUG})
     endif()
     target_compile_definitions(greenboost_cuda PRIVATE GB_USE_DETOURS=1)
+    target_link_libraries(greenboost_cuda PRIVATE gb_detours)
 else()
-    message(STATUS "Detours not found — shim will use manual IAT hooking")
-    target_compile_definitions(greenboost_cuda PRIVATE GB_USE_DETOURS=0)
+    message(FATAL_ERROR "Microsoft Detours is required. Install detours:x64-windows and set VCPKG_ROOT, or pass -DCMAKE_PREFIX_PATH=<installed/x64-windows>.")
 endif()
 
 # DLL exports

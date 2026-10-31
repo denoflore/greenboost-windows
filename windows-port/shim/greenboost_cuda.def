@@ -2,11 +2,9 @@
 ; Copyright (C) 2024-2026 Ferran Duarri
 ; GreenBoost v2.3 — DLL export definitions
 ;
-; When used as a proxy DLL (nvcuda.dll replacement), these exports
-; forward to the real nvcuda_real.dll. When used as a Detours-injected
-; DLL, only DllMain is needed (hooks are installed via DetourAttach).
+; Detours helper protocol. This is an injected DLL, not an nvcuda proxy.
 
 LIBRARY greenboost_cuda
 
 EXPORTS
-    DllMain             @1
+    DetourFinishHelperProcess @1 NONAME

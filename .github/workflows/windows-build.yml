@@ -1,0 +1,42 @@
+name: Windows portable build
+on:
+  push:
+    branches: [main]
+    paths: ['windows-port/**', '.github/workflows/windows-build.yml']
+  pull_request:
+    paths: ['windows-port/**', '.github/workflows/windows-build.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portable:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build Microsoft Detours 4.0.1
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch v4.0.1 https://github.com/microsoft/Detours.git "$env:RUNNER_TEMP\detours"
+          if ($LASTEXITCODE) { throw 'Detours checkout failed' }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          $env:DETOURS_TARGET_PROCESSOR = 'X64'
+          & $env:ComSpec /d /s /c "call `"$vcvars`" >nul && cd /d `"$env:RUNNER_TEMP\detours\src`" && nmake /nologo"
+          if ($LASTEXITCODE) { throw 'Detours compilation failed' }
+      - name: Build and package from repository root
+        shell: pwsh
+        run: ./windows-port/build.ps1 -DetoursRoot "$env:RUNNER_TEMP\detours" -StaticRuntime -Package
+      - name: Check packaged launcher without a GPU
+        shell: pwsh
+        run: |
+          $zip = 'windows-port/tools/outputs/GreenBoost-Windows-2.4.0-beta.1-x64.zip'
+          $folder = Join-Path $env:RUNNER_TEMP 'greenboost-smoke'
+          Expand-Archive -LiteralPath $zip -DestinationPath $folder
+          & "$folder/greenboost.exe" --help
+          if ($LASTEXITCODE) { throw 'Launcher help failed' }
+          & "$folder/greenboost.exe" "$folder/does-not-exist.exe"
+          if ($LASTEXITCODE -eq 0) { throw 'Missing application incorrectly succeeded' }
+          exit 0
