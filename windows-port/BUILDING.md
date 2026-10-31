@@ -28,8 +28,9 @@ Outputs go to `windows-port/tools/outputs`:
 - `greenboost.exe`
 - `greenboost_cuda.dll`
 - `test_cuda.exe`
+- `test_runtime.exe`, `test_lookup.exe` and `test_compatibility.ps1`
 - Usage, validation and licence files
-- `GreenBoost-Windows-2.4.0-beta.1-x64.zip` when `-Package` is selected
+- `GreenBoost-Windows-2.4.0-beta.2-x64.zip` when `-Package` is selected
 
 Only the explicit portable files enter the ZIP. No driver, installer, signing certificate or local configuration is packaged.
 
@@ -58,7 +59,7 @@ cmake --build windows-port/build --config Release
 
 ## Validation
 
-The build includes `test_cuda`, `test_runtime`, `test_child`, `test_capacity` and `test_free_error`. CUDA tests require a real NVIDIA GPU and driver. See [VALIDATION.md](VALIDATION.md) for the tested cases and bounds. The optional historical `test_uvm` target is available when CMake finds the CUDA SDK.
+The build includes `test_cuda`, `test_runtime`, `test_lookup`, `test_child`, `test_capacity` and `test_free_error`. CUDA tests require a real NVIDIA GPU and driver. See [VALIDATION.md](VALIDATION.md) for the tested cases and bounds, and [COMPATIBILITY.md](COMPATIBILITY.md) for repeatable runtime checks. The optional historical `test_uvm` target is available when CMake finds the CUDA SDK.
 
 GitHub's Windows build job checks compilation, packaging, help and the launcher's missing-application error. It does not claim GPU validation on a hosted runner.
 

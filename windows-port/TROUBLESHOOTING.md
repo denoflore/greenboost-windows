@@ -10,6 +10,8 @@
 
 **A CUDA library is missing.** Install/extract the dependencies provided by your CUDA application. GreenBoost does not bundle NVIDIA runtime libraries. The driver-level smoke test needs only the installed NVIDIA driver.
 
+**A newer CUDA application fails, or an older one stopped working.** Run `test_compatibility.ps1` against that application's runtime DLL and your intended CUDA device. Compare the native and injected cases. A native failure also needs attention in the application's driver/runtime setup. Use [COMPATIBILITY.md](COMPATIBILITY.md) to distinguish the tested runtime combinations from newer driver requirements and older GPU architecture limits. Keep NVIDIA libraries with their matching application build.
+
 **The build cannot find Detours or Visual Studio.** Follow [BUILDING.md](BUILDING.md), pass the Detours prefix, and use a CMake version supporting your installed Visual Studio. The build command works from the repository root or another folder.
 
 **Old install/diagnose scripts complain about greenboost.sys.** Those scripts target the legacy kernel-driver setup. They are not the installation or acceptance test for this portable beta.
