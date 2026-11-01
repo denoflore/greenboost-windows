@@ -17,8 +17,9 @@ run a model you supply. You can choose a GPU, set a memory allowance and reduce
 the memory used to remember previous tokens.
 
 **The larger goal is one logical memory space spanning VRAM, RAM and files.
-The experimental file library implements part of that design. Connecting it to
-an inference engine so whole models can use it automatically is still unfinished.**
+The experimental file library now has an opt-in llama.cpp adapter that loads
+selected MoE experts into a bounded VRAM pool.** It requires a separate source
+build. [Build, limits and measurements](windows-port/integrations/llama/README.md).
 
 ## Choose a version
 
@@ -119,10 +120,11 @@ GreenBoost has two mechanisms:
 | **Allocation library** used by the launcher | Intercepts selected CUDA allocation and capacity calls. NVIDIA controls the placement of managed memory. | Available now. Success and speed depend on the application, GPU, driver and Windows memory limits. |
 | **File library** called `FileTensor` | Gives a file one CUDA address range. It reads requested sections through RAM into a limited VRAM pool and reuses that VRAM for later sections. Each section keeps its address when reloaded. | Experimental developer API in 2.5. The application must request a section before the GPU uses it. |
 
-The file library is the foundation for using data larger than the VRAM pool.
-**It is not connected to llama.cpp's model scheduler.** Launching llama.cpp,
-Ollama or LM Studio through GreenBoost does not enable automatic model or
-MoE expert streaming from SSD.
+The optional llama.cpp adapter requests the actual routed expert weights
+before their CUDA kernels run. Its VRAM pool and pinned RAM cache have explicit
+budgets. The initial small-model check produced the resident run's text while
+using less VRAM, with slower inference. Launching an ordinary backend, Ollama
+or LM Studio through the allocation shim does not enable this adapter.
 
 The current file path uses the Windows file cache and RAM staging buffers.
 It does not implement direct SSD to GPU transfers. Optional NVIDIA hardware

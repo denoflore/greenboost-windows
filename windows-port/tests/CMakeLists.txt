@@ -13,6 +13,12 @@ add_executable(test_capacity test_capacity.c)
 add_executable(test_free_error test_free_error.c)
 add_executable(test_early_alloc test_early_alloc.c)
 
+if(GB_BUILD_STORAGE)
+    set_source_files_properties(test_residency.c PROPERTIES LANGUAGE CXX)
+    add_executable(test_residency test_residency.c)
+    target_link_libraries(test_residency PRIVATE greenboost_storage)
+endif()
+
 target_include_directories(test_ioctl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../driver
 )
