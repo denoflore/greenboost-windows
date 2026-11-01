@@ -34,6 +34,12 @@ own backends. See `RTX_KERNELS.md` for upstream changes and architecture limits.
 
 ## Adjust memory use
 
+For explicit offloading of MoE expert weights, use the separate
+[offloading setup guide](integrations/llama/README.md). It explains building
+the required backend, setting its VRAM pool and RAM cache, and switching
+back to normal loading. The portable helper below does not automatically
+enable expert paging when memory is exhausted.
+
 The helper uses one CUDA GPU, Flash Attention and supported GPU sampling.
 It defaults to a 4,096 token context, 128 output tokens and a 4,096 MiB extra
 capacity allowance. The allowance does not reserve RAM or guarantee that a
@@ -114,9 +120,12 @@ The storage build includes `greenboost_storage.lib`, `file_tensor.h` and
 using a bounded VRAM pool and two pinned RAM staging buffers. The caller must
 request residency before a kernel consumes the region.
 
-**This API is not connected to llama.cpp's model scheduler.** Running the
-model helper does not stream model weights or MoE experts from SSD through
-this library. File reads use the Windows cache and RAM staging buffers.
+The separately compiled MoE backend connects this API to llama.cpp's expert
+operations. It loads the selected expert weights into a bounded VRAM pool,
+with an optional pinned RAM cache. Use `build_moe.ps1` and `run_moe.ps1` from
+the source tree as described in the [configuration guide](integrations/llama/README.md).
+The portable `run_llama.ps1` helper and allocation shim do not enable this
+adapter. File reads use the Windows cache and RAM staging buffers.
 Optional NVIDIA hardware memory compression is lossless; it does not increase
 capacity or compress the file.
 See `EXPERIMENTAL.md` for API use, tests and exact limits.

@@ -19,13 +19,13 @@ the memory used to remember previous tokens.
 **The larger goal is one logical memory space spanning VRAM, RAM and files.
 The experimental file library now has an opt-in llama.cpp adapter that loads
 selected MoE experts into a bounded VRAM pool.** It requires a separate source
-build. [Build, limits and measurements](windows-port/integrations/llama/README.md).
+build. [Offloading setup, memory limits and launch instructions](windows-port/integrations/llama/README.md).
 
 ## Choose a version
 
 | Version | How to get it | What you get |
 | --- | --- | --- |
-| **2.5.0 experimental** on `main` | [Build from source](windows-port/BUILDING.md) | VRAM first allocation, cache controls, GPU inspection and an optional file library for developers. |
+| **2.5.0 experimental** on `main` | [Build from source](windows-port/BUILDING.md) | VRAM first allocation, cache controls, GPU inspection and an optional file library with a separate MoE inference backend. |
 | **2.4.0 beta 3**, latest published binary | [Download the Windows ZIP](https://github.com/denoflore/greenboost-windows/releases/download/v2.4.0-beta.3/GreenBoost-Windows-2.4.0-beta.3-x64.zip) | Portable launcher and llama.cpp scripts. It uses the earlier allocation policy and lacks the 2.5 features above. |
 
 There is **no published 2.5 binary yet**. Downloading beta 3 does not install the
@@ -107,6 +107,36 @@ Use `-ExtraMiB 0` to disable the extra capacity allowance, or
 The [portable guide](windows-port/README.md) lists all allocation settings and
 verification commands.
 
+## Offload model experts when needed
+
+Use normal loading when your model and context fit on the card. The separate
+experimental MoE backend can keep expert weights in a GGUF file and bring
+the sections it needs through RAM into a limited GPU memory pool. Other
+weights, context memory and calculations remain on the GPU.
+
+**You select this mode before launching. The ordinary helper does not switch
+to it automatically when VRAM fills up.** It applies to supported quantised
+MoE models and requires the separate source build. Dense models and existing
+Ollama or LM Studio installations do not gain expert paging from the shim.
+
+After building that backend, run from the repository root:
+
+```powershell
+.\windows-port\tools\run_moe.ps1 `
+    -LlamaDirectory '.\windows-port\tools\backends\greenboost-moe-b12019\build\bin' `
+    -Model 'D:\models\your-moe-model.gguf' -Gpu 0 `
+    -ExpertVramMiB 1024 -ExpertRamMiB 4096 `
+    -Context 2048 -MicroBatch 8 -Tokens 128
+```
+
+These example settings give experts a 1 GiB VRAM pool and 4 GiB RAM cache.
+They do not cap total process memory or guarantee that a particular model
+fits. Moving weights repeatedly can slow generation considerably.
+
+The [full offloading guide](windows-port/integrations/llama/README.md) covers
+prerequisites, building, choosing the GPU, sizing both budgets, recognising
+active paging, resolving memory errors and returning to normal loading.
+
 ## What "one memory" means here
 
 A program can keep one address for a piece of data while software controls
@@ -139,7 +169,7 @@ Recorded on **October 31, 2026**, on Windows 11 with NVIDIA driver 610.88:
 | --- | --- | --- |
 | CUDA allocation compatibility | 45 cases across CUDA 11.8 through 13.4, primarily on RTX 3060, plus packaged CUDA 13.4 on RTX 5090. | The tested allocation, GPU write, readback and free paths worked with those runtimes. |
 | Allocation policies and file library | Passed on RTX 3060, 3090, 4090, 5060 Ti and 5090. | Those bounded tests worked on five cards. |
-| File larger than its VRAM pool | A 256 MiB file plus a partial final chunk used a 32 MiB VRAM pool, with zero GPU verification mismatches. | Explicit loading, eviction and reloading worked; model inference through this API has not been tested. |
+| File larger than its VRAM pool | A 256 MiB file plus a partial final chunk used a 32 MiB VRAM pool, with zero GPU verification mismatches. | Explicit loading, eviction and reloading worked in that storage fixture. |
 | Smaller KV cache | For one Qwen3.5 4B model at a 32,768 token context: 1,024 MiB for f16, 544 MiB for q8_0, 288 MiB for q4_0. | Memory savings and a short completion were observed. Long context accuracy and broader model quality remain unmeasured. |
 
 The allocation change also recovered a slow configuration: with five GPUs
@@ -148,6 +178,11 @@ generated tokens/s. Each run used 128 prompt tokens, 8 generated tokens and
 two repetitions. The model already fit in VRAM. With only one GPU visible,
 both policies performed similarly. This result applies to that configuration;
 inference beyond VRAM capacity was not measured by this comparison.
+
+Separate [November 1 model receipts](windows-port/integrations/llama/README.md#evidence)
+cover the new MoE backend. Two prompts matched resident output using a small
+expert pool on an RTX 3060. Paging was slower for that model, which already
+fits on the card; throughput for models larger than VRAM remains unqualified.
 
 The [full report](windows-port/EXPERIMENTAL.md) records exact workloads,
 processes, device placement, utilisation and limitations. GitHub Actions checks
@@ -173,6 +208,7 @@ controls. [Backend changes and attribution](windows-port/RTX_KERNELS.md).
 ## Documentation and credits
 
 - [Portable usage and settings](windows-port/README.md)
+- [Configure MoE offloading and memory budgets](windows-port/integrations/llama/README.md)
 - [Build instructions](windows-port/BUILDING.md)
 - [Troubleshooting](windows-port/TROUBLESHOOTING.md)
 - [Experimental design, public research and measurements](windows-port/EXPERIMENTAL.md)
